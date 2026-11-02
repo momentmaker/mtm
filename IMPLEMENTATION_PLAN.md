@@ -7,7 +7,7 @@ Spec: `docs/superpowers/specs/2026-11-02-mtm-design.md`. Each stage gets its own
 **Success Criteria**: a simulated migration (a `ditto` copy of a seeded home folder) verifies as SAFE TO WIPE. Each injected fault produces NOT SAFE TO WIPE naming the right check: a missing SSH key, a corrupted dotfile, a missing repo, a corrupted `.env`, or verifying on the same Mac. Changes made after `prepare` do not block.
 **Tests**: unit tests per package (fake runner); table tests for file classification and the verdict; integration tests with real git and real files in temp home folders; the simulated-migration tests in `internal/app`.
 **Plan**: `docs/superpowers/plans/2026-11-02-mtm-stage1-core-files-git.md`
-**Status**: Not Started
+**Status**: Complete
 
 ## Stage 2: Machine state and `finish`
 **Goal**: the `system` module (app inventory, Intel-only apps and Rosetta, login shell, `/etc` files), `homebrew` (Brewfile, stopping and restarting services, root services printed), `toolchains` (versions resolved through the login shell), and `loginitems`. Adds the `mtm finish` command and `prepare --undo`, and switches the post-prepare instructions to `mtm finish`.
