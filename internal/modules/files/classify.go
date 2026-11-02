@@ -55,7 +55,7 @@ func Classify(rec manifest.Entry, obs Observed, preparedAt int64, isVolatile fun
 		return NotChecked
 	case obs.Dataless:
 		return CloudOnly
-	case rec.Type != manifest.TypeDir && obs.MTime > preparedAt:
+	case rec.Type != manifest.TypeDir && changedAfterPrepare(rec, obs, preparedAt):
 		return ChangedAfterPrepare
 	case obs.Type != rec.Type:
 		return Corrupt
@@ -65,6 +65,14 @@ func Classify(rec manifest.Entry, obs Observed, preparedAt int64, isVolatile fun
 		return Corrupt
 	}
 	return Match
+}
+
+// changedAfterPrepare needs a time later than prepare that also differs
+// from the recorded one. A file written during the walk, or dated in the
+// future, keeps its recorded time when copied intact, so it still gets the
+// corruption check.
+func changedAfterPrepare(rec manifest.Entry, obs Observed, preparedAt int64) bool {
+	return obs.MTime > preparedAt && obs.MTime != rec.MTime
 }
 
 func knownType(t string) bool {

@@ -113,6 +113,19 @@ func TestVerifyFailsOnCorruptionWithOriginalTime(t *testing.T) {
 	}
 }
 
+func TestVerifyFailsOnCorruptionOfFutureDatedFile(t *testing.T) {
+	home := seedHome(t)
+	path := filepath.Join(home, ".zshrc")
+	future := time.Now().Add(time.Hour)
+	os.Chtimes(path, future, future)
+	m := prepareHome(t, home)
+	os.WriteFile(path, []byte("export B=2\n"), 0o644)
+	os.Chtimes(path, future, future)
+	if c := verifyHome(t, home, m)[HomeGroup]; c.Status != module.StatusFail {
+		t.Errorf("home group = %+v, want fail: same time as recorded, different content", c)
+	}
+}
+
 func TestVerifyNotesChangesAfterPrepare(t *testing.T) {
 	home := seedHome(t)
 	m := prepareHome(t, home)

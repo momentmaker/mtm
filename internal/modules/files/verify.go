@@ -86,7 +86,7 @@ func observe(home string, rec manifest.Entry, preparedAt int64) (Observed, error
 	default:
 		obs.Type = manifest.TypeFile
 	}
-	needsHash := rec.Hash != "" && obs.Type == manifest.TypeFile && !obs.Dataless && obs.MTime <= preparedAt && obs.Size == rec.Size
+	needsHash := rec.Hash != "" && obs.Type == manifest.TypeFile && !obs.Dataless && obs.Size == rec.Size && !changedAfterPrepare(rec, obs, preparedAt)
 	if !needsHash {
 		return obs, nil
 	}

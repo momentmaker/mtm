@@ -24,6 +24,10 @@ func TestClassify(t *testing.T) {
 	link := manifest.Entry{Path: "link", Type: manifest.TypeLink, Target: "GitHub", MTime: 900, Area: manifest.AreaCritical}
 	dir := manifest.Entry{Path: "GitHub", Type: manifest.TypeDir, Area: manifest.AreaCritical}
 	same := Observed{Exists: true, Type: manifest.TypeFile, Size: 10, MTime: 900}
+	late := file
+	late.MTime = 1_200
+	lateHashed := late
+	lateHashed.Hash = "sha256:aa"
 
 	tests := []struct {
 		name     string
@@ -47,6 +51,9 @@ func TestClassify(t *testing.T) {
 		{"symlink target changed", link, Observed{Exists: true, Type: manifest.TypeLink, Target: "Elsewhere", MTime: 900}, notVolatile, Corrupt},
 		{"file became a folder", file, Observed{Exists: true, Type: manifest.TypeDir, MTime: 900}, notVolatile, Corrupt},
 		{"folder with new entries", dir, Observed{Exists: true, Type: manifest.TypeDir, MTime: 1_500}, notVolatile, Match},
+		{"recorded after prepare, unchanged time, size differs", late, Observed{Exists: true, Type: manifest.TypeFile, Size: 11, MTime: 1_200}, notVolatile, Corrupt},
+		{"recorded after prepare, unchanged time, fingerprint differs", lateHashed, withHash(Observed{Exists: true, Type: manifest.TypeFile, Size: 10, MTime: 1_200}, "sha256:bb"), notVolatile, Corrupt},
+		{"recorded after prepare, newer time, size differs", late, Observed{Exists: true, Type: manifest.TypeFile, Size: 11, MTime: 1_300}, notVolatile, ChangedAfterPrepare},
 		{"missing, unknown area", manifest.Entry{Path: "x", Type: manifest.TypeFile, Area: "future"}, Observed{}, notVolatile, MissingCritical},
 		{"unknown type", manifest.Entry{Path: "x", Type: "future", Area: manifest.AreaCritical}, same, notVolatile, Corrupt},
 		{"unknown type, missing", manifest.Entry{Path: "x", Type: "future", Area: manifest.AreaAppState}, Observed{}, notVolatile, Corrupt},
