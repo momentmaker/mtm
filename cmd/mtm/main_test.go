@@ -5,6 +5,7 @@ import (
 	"context"
 	"encoding/json"
 	"path/filepath"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -190,5 +191,15 @@ func TestPrepareUndoWithoutRecordFails(t *testing.T) {
 	code := run(ctx, []string{"prepare", "--undo"}, &out, &errOut, fileVaultOnApp)
 	if code != exitFailed || !strings.Contains(errOut.String(), "run mtm prepare") {
 		t.Errorf("code %d stderr %q", code, errOut.String())
+	}
+}
+
+func TestDefaultAppModules(t *testing.T) {
+	var names []string
+	for _, m := range defaultApp(t.TempDir()).Modules {
+		names = append(names, m.Name())
+	}
+	if want := []string{"files", "git", "system", "homebrew", "toolchains", "loginitems"}; !slices.Equal(names, want) {
+		t.Errorf("modules = %q, want %q", names, want)
 	}
 }

@@ -38,7 +38,7 @@ Found in the final review and deliberately deferred. None of them can produce a 
 **Success Criteria**: on the author's M3, `scan` lists every toolchain and brew service correctly. `prepare` stops and `--undo` restarts brew services. `verify` reports matching versions on a copy.
 **Tests**: fixture-driven unit tests from real macOS 26 command output; a no-network test that runs every `brew` command `mtm` uses under a `sandbox-exec` profile that denies network access.
 **Plan**: `docs/superpowers/plans/2026-11-02-mtm-stage2-machine-state.md`
-**Status**: Not Started
+**Status**: Complete
 
 ## Stage 3: Docker Desktop and Postgres
 **Goal**: the `docker` module (volume and locally built image export without network or helper images, content digests, skipping the restore when `Docker.raw` arrived intact, `compose up --pull never`) and `databases` (safety-net `pg_dumpall`, clean stop, `--restore-dump`). Adds free-space checks with a 10 GB reserve, `prepare --stage` on an encrypted APFS volume, export fingerprint checks before restore, and skipping steps whose inputs are unchanged on re-run.

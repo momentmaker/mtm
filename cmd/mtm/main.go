@@ -9,6 +9,7 @@ import (
 	"io"
 	"os"
 	"os/signal"
+	"os/user"
 	"strings"
 	"time"
 
@@ -16,6 +17,10 @@ import (
 	"github.com/momentmaker/mtm/internal/module"
 	"github.com/momentmaker/mtm/internal/modules/files"
 	"github.com/momentmaker/mtm/internal/modules/git"
+	"github.com/momentmaker/mtm/internal/modules/homebrew"
+	"github.com/momentmaker/mtm/internal/modules/loginitems"
+	"github.com/momentmaker/mtm/internal/modules/system"
+	"github.com/momentmaker/mtm/internal/modules/toolchains"
 	"github.com/momentmaker/mtm/internal/report"
 	"github.com/momentmaker/mtm/internal/runner"
 )
@@ -59,13 +64,24 @@ func main() {
 }
 
 func defaultApp(home string) *app.App {
+	name := currentUser()
 	return &app.App{
 		Runner:  runner.Exec{},
 		Home:    home,
 		Version: version,
 		Now:     time.Now,
-		Modules: []module.Module{files.New(), git.New()},
+		Modules: []module.Module{
+			files.New(), git.New(), system.New(name), homebrew.New(name), toolchains.New(name), loginitems.New(os.Getuid()),
+		},
 	}
+}
+
+// currentUser is the account name Directory Services knows the user by.
+func currentUser() string {
+	if u, err := user.Current(); err == nil {
+		return u.Username
+	}
+	return os.Getenv("USER")
 }
 
 func run(ctx context.Context, args []string, stdout, stderr io.Writer, newApp func(home string) *app.App) int {
