@@ -2,6 +2,7 @@ package git
 
 import (
 	"context"
+	"fmt"
 	"io/fs"
 	"maps"
 	"os"
@@ -344,5 +345,115 @@ func TestUnusualRepoStates(t *testing.T) {
 		if c.Status != module.StatusPass {
 			t.Errorf("%s: %s (%s)", title, c.Status, c.Detail)
 		}
+	}
+}
+
+// seedHomeRepo runs git init in the home folder itself, with one committed
+// dotfile, an ignored .env, and a pile of ordinary files.
+func seedHomeRepo(t *testing.T) string {
+	t.Helper()
+	testutil.IsolateGit(t)
+	home := t.TempDir()
+	for i := range 50 {
+		testutil.WriteFile(t, filepath.Join(home, "Documents", fmt.Sprintf("f%02d.txt", i)), "x")
+	}
+	testutil.WriteFile(t, filepath.Join(home, "Library/Preferences/p.plist"), "plist\n")
+	testutil.WriteFile(t, filepath.Join(home, ".gitignore"), ".env\n")
+	testutil.WriteFile(t, filepath.Join(home, ".env"), "SECRET=1\n")
+	testutil.WriteFile(t, filepath.Join(home, ".zshrc"), "export A=1\n")
+	testutil.Git(t, home, "init", "-q", "-b", "main")
+	testutil.Git(t, home, "add", ".zshrc", ".gitignore")
+	testutil.Git(t, home, "commit", "-q", "-m", "dotfiles")
+	return home
+}
+
+func TestHomeFolderRepoRecordsCommitsOnly(t *testing.T) {
+	home := seedHomeRepo(t)
+	res, err := New().Prepare(testEnv(home, nil), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	inv := res.Inventory.(Inventory)
+	i := slices.IndexFunc(inv.Repos, func(r Repo) bool { return r.Path == "." })
+	if i < 0 {
+		t.Fatalf("repos = %+v, want the home folder repo", inv.Repos)
+	}
+	r := inv.Repos[i]
+	if len(r.Untracked) != 0 || len(r.Important) != 0 || len(r.Fingerprints) != 0 {
+		t.Errorf("home repo listed %d untracked, %d important, %d fingerprints; want none", len(r.Untracked), len(r.Important), len(r.Fingerprints))
+	}
+	if r.HeadCommit == "" {
+		t.Error("home repo commit not recorded")
+	}
+	m := manifest.New("test")
+	if err := m.SetModule(Name, time.Now(), res.Inventory); err != nil {
+		t.Fatal(err)
+	}
+	if c := verify(t, copyHome(t, home), m)["~"]; c.Status != module.StatusPass {
+		t.Errorf("home repo check = %+v, want pass on an identical copy", c)
+	}
+}
+
+func TestScanWarnsAboutHomeFolderRepo(t *testing.T) {
+	home := seedHomeRepo(t)
+	findings, err := New().Scan(testEnv(home, nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	i := slices.IndexFunc(findings, func(f module.Finding) bool { return f.ID == "home-repo" })
+	if i < 0 {
+		t.Fatalf("findings = %+v, want a home-repo warning", findings)
+	}
+	if f := findings[i]; f.Severity != module.SeverityWarn || !strings.Contains(f.Title+" "+f.Detail, "mtm checks its commits, and the files check covers the files in it") {
+		t.Errorf("finding = %+v", f)
+	}
+}
+
+func lowerFingerprintLimit(t *testing.T, n int) {
+	t.Helper()
+	old := maxFingerprintedFiles
+	maxFingerprintedFiles = n
+	t.Cleanup(func() { maxFingerprintedFiles = old })
+}
+
+func TestRepoWithTooManyUntrackedFilesSkipsFingerprints(t *testing.T) {
+	home := t.TempDir()
+	repo := seedRepo(t, home)
+	testutil.WriteFile(t, filepath.Join(repo, "more.txt"), "more\n")
+	lowerFingerprintLimit(t, 2)
+
+	res, err := New().Prepare(testEnv(home, nil), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	r := res.Inventory.(Inventory).Repos[0]
+	if len(r.Fingerprints) != 0 || len(r.Untracked) != 2 {
+		t.Errorf("fingerprints = %v, untracked = %q; want no fingerprints and both untracked files listed", r.Fingerprints, r.Untracked)
+	}
+	isLimit := func(f module.Finding) bool {
+		return f.ID == "too-many-files:GitHub/app" && f.Severity == module.SeverityWarn
+	}
+	if !slices.ContainsFunc(res.Problems, isLimit) {
+		t.Errorf("prepare problems = %+v, want a too-many-files warning", res.Problems)
+	}
+	findings, err := New().Scan(testEnv(home, nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.ContainsFunc(findings, isLimit) {
+		t.Errorf("scan findings = %+v, want a too-many-files warning", findings)
+	}
+}
+
+func TestRepoAtTheFingerprintLimitIsFingerprinted(t *testing.T) {
+	home := t.TempDir()
+	seedRepo(t, home)
+	lowerFingerprintLimit(t, 2)
+	res, err := New().Prepare(testEnv(home, nil), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if r := res.Inventory.(Inventory).Repos[0]; len(r.Fingerprints) != 2 || len(res.Problems) != 0 {
+		t.Errorf("fingerprints = %d, problems = %+v; want 2 fingerprints and no warning", len(r.Fingerprints), res.Problems)
 	}
 }

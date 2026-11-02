@@ -3,6 +3,7 @@
 package git
 
 import (
+	"fmt"
 	"strings"
 
 	"github.com/momentmaker/mtm/internal/module"
@@ -48,6 +49,19 @@ func (m Module) Scan(env module.Env) ([]module.Finding, error) {
 			findings = append(findings, unreadableRepo(rel, err))
 			continue
 		}
+		if rel == "." {
+			findings = append(findings, module.Finding{
+				Module:   Name,
+				ID:       "home-repo",
+				Severity: module.SeverityWarn,
+				Handler:  module.ByMigrationAssistant,
+				Title:    "Your home folder is a git repository",
+				Detail:   "mtm checks its commits, and the files check covers the files in it.",
+			})
+		}
+		if r.tooManyToFingerprint() {
+			findings = append(findings, tooManyFiles(r))
+		}
 		if risks := r.risks(); len(risks) > 0 {
 			findings = append(findings, module.Finding{
 				Module:   Name,
@@ -79,6 +93,9 @@ func (m Module) Prepare(env module.Env, _ *stage.Stage) (module.Result, error) {
 			res.Problems = append(res.Problems, unreadableRepo(rel, err))
 			continue
 		}
+		if r.tooManyToFingerprint() {
+			res.Problems = append(res.Problems, tooManyFiles(r))
+		}
 		inv.Repos = append(inv.Repos, r)
 	}
 	res.Inventory = inv
@@ -89,6 +106,19 @@ func (m Module) Prepare(env module.Env, _ *stage.Stage) (module.Result, error) {
 // Finish has nothing to restore: Migration Assistant copies the repos.
 func (Module) Finish(module.Env, *stage.Stage) (module.Result, error) {
 	return module.Result{}, nil
+}
+
+func tooManyFiles(r Repo) module.Finding {
+	return module.Finding{
+		Module:   Name,
+		ID:       "too-many-files:" + r.Path,
+		Severity: module.SeverityWarn,
+		Handler:  module.ByMigrationAssistant,
+		Title:    displayPath(r.Path) + ": too many untracked files to fingerprint",
+		Detail: fmt.Sprintf("%d untracked and important ignored files, more than %d. mtm checks this repository's commits, and the files check still records these files by size and time.",
+			len(r.Untracked)+len(r.Important), maxFingerprintedFiles),
+		Fix: "If they are build output or downloads, add them to .gitignore. Otherwise there is nothing to do.",
+	}
 }
 
 func unreadableRepo(rel string, err error) module.Finding {

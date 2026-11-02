@@ -103,20 +103,41 @@ func collect(env module.Env, rel string, withFingerprints bool) (Repo, error) {
 			return r, err
 		}
 	}
-	status, err := g.output("status", "--porcelain=v2", "--branch", "-z", "--untracked-files=all", "--ignored=matching")
+	status, err := g.output(statusArgs(rel)...)
 	if err != nil {
 		return r, err
 	}
 	var ignored []string
 	r.Status, r.Untracked, ignored = parseStatus(status)
 	r.Important = importantIgnored(ignored)
-	if withFingerprints {
+	if withFingerprints && !r.tooManyToFingerprint() {
 		paths := append(append([]string(nil), r.Untracked...), r.Important...)
 		if r.Fingerprints, err = fingerprint(abs, paths); err != nil {
 			return r, err
 		}
 	}
 	return r, nil
+}
+
+// statusArgs lists untracked and ignored files, except in a repo at the
+// home folder itself. There they would be every file in the home folder,
+// which the files module already records, and hashing them all would take
+// hours.
+func statusArgs(rel string) []string {
+	if rel == "." {
+		return []string{"status", "--porcelain=v2", "--branch", "-z", "--untracked-files=no"}
+	}
+	return []string{"status", "--porcelain=v2", "--branch", "-z", "--untracked-files=all", "--ignored=matching"}
+}
+
+// maxFingerprintedFiles caps the untracked and important files fingerprinted
+// per repo. Above it, the repo is usually a build or download folder, and
+// the files module still records each file. It is a variable so tests can
+// lower it.
+var maxFingerprintedFiles = 5000
+
+func (r Repo) tooManyToFingerprint() bool {
+	return len(r.Untracked)+len(r.Important) > maxFingerprintedFiles
 }
 
 func fingerprint(repoAbs string, rels []string) (map[string]string, error) {
