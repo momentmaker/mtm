@@ -38,9 +38,21 @@ type gitCLI struct {
 	dir string
 }
 
+// redirectingEnv are variables that point git at a different repository,
+// index, or object store than the one in g.dir. Inherited from the user's
+// shell, they would make mtm record or check the wrong repo.
+var redirectingEnv = []string{
+	"GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_OBJECT_DIRECTORY",
+	"GIT_ALTERNATE_OBJECT_DIRECTORIES", "GIT_COMMON_DIR", "GIT_NAMESPACE",
+}
+
+// gitEnv keeps git off the network (no lazy fetch of missing objects in a
+// partial clone) and from waiting on a credential prompt.
+var gitEnv = []string{"GIT_NO_LAZY_FETCH=1", "GIT_TERMINAL_PROMPT=0"}
+
 func (g gitCLI) command(args ...string) runner.Command {
 	base := []string{"-C", g.dir, "--no-optional-locks", "-c", "core.fsmonitor=false"}
-	return runner.Command{Name: "git", Args: append(base, args...)}
+	return runner.Command{Name: "git", Args: append(base, args...), Unset: redirectingEnv, Env: gitEnv}
 }
 
 func (g gitCLI) output(args ...string) ([]byte, error) {

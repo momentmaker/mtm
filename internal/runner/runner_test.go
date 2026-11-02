@@ -52,6 +52,23 @@ func TestExecRunsInDirWithEnvAndStdin(t *testing.T) {
 	}
 }
 
+func TestExecUnsetsVariablesBeforeAddingEnv(t *testing.T) {
+	t.Setenv("MTM_UNSET_ME", "inherited")
+	t.Setenv("MTM_KEEP", "kept")
+	out, err := Exec{}.Run(context.Background(), Command{
+		Name:  "/bin/sh",
+		Args:  []string{"-c", `printf '%s|%s|%s' "${MTM_UNSET_ME-unset}" "$MTM_KEEP" "$MTM_ADDED"`},
+		Unset: []string{"MTM_UNSET_ME"},
+		Env:   []string{"MTM_ADDED=added"},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := string(out.Stdout); got != "unset|kept|added" {
+		t.Errorf("stdout = %q, want %q", got, "unset|kept|added")
+	}
+}
+
 func TestFakeReturnsCannedResponse(t *testing.T) {
 	f := &Fake{Responses: map[string]Response{"/usr/bin/fdesetup status": {Stdout: "FileVault is On.\n"}}}
 	out, err := f.Run(context.Background(), Command{Name: "/usr/bin/fdesetup", Args: []string{"status"}})

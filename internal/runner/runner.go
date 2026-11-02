@@ -11,12 +11,14 @@ import (
 	"github.com/momentmaker/mtm/internal/redact"
 )
 
-// Command is one system command. Env entries are appended to the current
-// environment. Stdin, when set, is written to the command's standard input.
+// Command is one system command. Unset names variables removed from the
+// current environment, and Env entries are then appended to it. Stdin,
+// when set, is written to the command's standard input.
 type Command struct {
 	Name  string
 	Args  []string
 	Dir   string
+	Unset []string
 	Env   []string
 	Stdin string
 }

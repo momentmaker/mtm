@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"os"
 	"os/exec"
+	"slices"
 	"strings"
 )
 
@@ -17,8 +18,8 @@ type Exec struct{}
 func (Exec) Run(ctx context.Context, cmd Command) (Output, error) {
 	c := exec.CommandContext(ctx, cmd.Name, cmd.Args...)
 	c.Dir = cmd.Dir
-	if len(cmd.Env) > 0 {
-		c.Env = append(os.Environ(), cmd.Env...)
+	if len(cmd.Env) > 0 || len(cmd.Unset) > 0 {
+		c.Env = append(without(os.Environ(), cmd.Unset), cmd.Env...)
 	}
 	if cmd.Stdin != "" {
 		c.Stdin = strings.NewReader(cmd.Stdin)
@@ -37,4 +38,15 @@ func (Exec) Run(ctx context.Context, cmd Command) (Output, error) {
 		return out, newExitError(cmd, out.Code, out.Stderr)
 	}
 	return out, fmt.Errorf("%s: %w", Display(cmd), err)
+}
+
+func without(env, names []string) []string {
+	out := make([]string, 0, len(env))
+	for _, kv := range env {
+		name, _, _ := strings.Cut(kv, "=")
+		if !slices.Contains(names, name) {
+			out = append(out, kv)
+		}
+	}
+	return out
 }

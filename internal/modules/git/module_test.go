@@ -211,6 +211,40 @@ func TestRisksCountChangedTrackedFiles(t *testing.T) {
 	}
 }
 
+func TestGitIgnoresRepoRedirectingEnvironment(t *testing.T) {
+	home := t.TempDir()
+	repo := seedRepo(t, home)
+	want := testutil.Git(t, repo, "rev-parse", "HEAD")
+	other := filepath.Join(t.TempDir(), "other")
+	os.MkdirAll(other, 0o755)
+	testutil.Git(t, other, "init", "-q", "-b", "main")
+	testutil.Git(t, other, "commit", "-q", "--allow-empty", "-m", "elsewhere")
+	t.Setenv("GIT_DIR", filepath.Join(other, ".git"))
+	t.Setenv("GIT_WORK_TREE", other)
+
+	res, err := New().Prepare(testEnv(home, nil), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := res.Inventory.(Inventory).Repos[0].HeadCommit; got != want {
+		t.Errorf("recorded HEAD %s, want %s from ~/GitHub/app, not the repo GIT_DIR names", got, want)
+	}
+}
+
+func TestGitCommandsNeverPromptOrFetch(t *testing.T) {
+	cmd := gitCLI{dir: "/r"}.command("status")
+	for _, want := range []string{"GIT_NO_LAZY_FETCH=1", "GIT_TERMINAL_PROMPT=0"} {
+		if !slices.Contains(cmd.Env, want) {
+			t.Errorf("env = %q, missing %s", cmd.Env, want)
+		}
+	}
+	for _, want := range []string{"GIT_DIR", "GIT_WORK_TREE", "GIT_INDEX_FILE", "GIT_OBJECT_DIRECTORY", "GIT_ALTERNATE_OBJECT_DIRECTORIES", "GIT_COMMON_DIR", "GIT_NAMESPACE"} {
+		if !slices.Contains(cmd.Unset, want) {
+			t.Errorf("unset = %q, missing %s", cmd.Unset, want)
+		}
+	}
+}
+
 func TestPrepareRecordsRepoState(t *testing.T) {
 	home := t.TempDir()
 	seedRepo(t, home)
