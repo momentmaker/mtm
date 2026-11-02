@@ -4,6 +4,7 @@ package macos
 
 import (
 	"context"
+	"errors"
 	"fmt"
 	"strings"
 
@@ -50,6 +51,19 @@ func Archs(ctx context.Context, r runner.Runner, exe string) []string {
 		return nil
 	}
 	return strings.Fields(string(out.Stdout))
+}
+
+// MajorVersion returns the macOS major version, "26" for 26.7.1.
+func MajorVersion(ctx context.Context, r runner.Runner) (string, error) {
+	out, err := r.Run(ctx, runner.Command{Name: "/usr/bin/sw_vers", Args: []string{"-productVersion"}})
+	if err != nil {
+		return "", fmt.Errorf("read macOS version: %w", err)
+	}
+	major, _, _ := strings.Cut(strings.TrimSpace(string(out.Stdout)), ".")
+	if major == "" {
+		return "", errors.New("read macOS version: sw_vers printed nothing")
+	}
+	return major, nil
 }
 
 // quoteEscapes moves backslashes out of the single quotes as well as

@@ -8,6 +8,7 @@ import (
 	"fmt"
 	"os"
 	"path/filepath"
+	"regexp"
 	"slices"
 	"strings"
 
@@ -26,15 +27,21 @@ const (
 // brewEnv stops Homebrew updating itself, sending analytics, printing
 // hints, and cleaning up, so brew changes nothing on mtm's behalf. It
 // doesn't stop brew downloading package data it lacks; checkCache covers
-// that before any other brew command runs.
+// that before any other brew command runs. brewUnset covers
+// HOMEBREW_FORCE_API_AUTO_UPDATE, which refreshes even with auto-update off.
 var brewEnv = []string{"HOMEBREW_NO_AUTO_UPDATE=1", "HOMEBREW_NO_ANALYTICS=1", "HOMEBREW_NO_ENV_HINTS=1", "HOMEBREW_NO_INSTALL_CLEANUP=1"}
 
+var brewUnset = []string{"HOMEBREW_FORCE_API_AUTO_UPDATE"}
+
 type Module struct {
-	Brew string
-	User string
+	Brew   string
+	User   string
+	Getenv func(string) string
 }
 
-func New(user string) Module { return Module{Brew: "/opt/homebrew/bin/brew", User: user} }
+func New(user string) Module {
+	return Module{Brew: "/opt/homebrew/bin/brew", User: user, Getenv: os.Getenv}
+}
 
 func (Module) Name() string { return Name }
 
@@ -64,7 +71,7 @@ func (m Module) installed() bool {
 }
 
 func (m Module) brew(env module.Env, args ...string) (runner.Output, error) {
-	return env.Run.Run(env.Ctx, runner.Command{Name: m.Brew, Args: args, Env: brewEnv})
+	return env.Run.Run(env.Ctx, runner.Command{Name: m.Brew, Args: args, Unset: brewUnset, Env: brewEnv})
 }
 
 const noCacheTitle = "Homebrew's package data isn't cached on this Mac, so brew would download it"
@@ -88,8 +95,13 @@ func describe(f module.Finding) string {
 
 // checkCache runs before any other brew command. With its package data
 // missing, brew downloads it, even with auto-update off, and mtm must not
-// reach the network (spec 6.2). brew --cache reads no package data.
+// reach the network (spec 6.2). Homebrew 7 reads only the file for the
+// running macOS, so any other cached file doesn't count. brew --cache reads
+// no package data.
 func (m Module) checkCache(env module.Env) error {
+	if m.Getenv("HOMEBREW_NO_INSTALL_FROM_API") != "" {
+		return nil
+	}
 	out, err := m.brew(env, "--cache")
 	if err != nil {
 		return fmt.Errorf("find Homebrew's cache: %w", err)
@@ -98,38 +110,62 @@ func (m Module) checkCache(env module.Env) error {
 	if !filepath.IsAbs(cache) {
 		return fmt.Errorf("brew --cache printed %q, not a folder", cache)
 	}
-	api := filepath.Join(cache, "api")
-	if !hasPackageData(api) {
-		return fmt.Errorf("no package data in %s", api)
+	codename, err := m.codename(env)
+	if err != nil {
+		return err
+	}
+	file := filepath.Join(cache, "api", "internal", "packages.arm64_"+codename+".jws.json")
+	if info, err := os.Stat(file); err != nil || !info.Mode().IsRegular() || info.Size() == 0 {
+		return fmt.Errorf("no package data in %s", file)
 	}
 	return nil
 }
 
-// hasPackageData looks for a non-empty *.jws.json in api or one folder
-// below it, where Homebrew 7 keeps internal/packages.<tag>.jws.json. A
-// folder it can't read counts as empty, which mtm reports.
-func hasPackageData(api string) bool {
-	dirs := []string{api}
-	entries, _ := os.ReadDir(api)
-	for _, e := range entries {
-		if e.IsDir() {
-			dirs = append(dirs, filepath.Join(api, e.Name()))
-		}
+// releaseLine is one `tahoe:       "26",` entry of the RELEASES table.
+var releaseLine = regexp.MustCompile(`^\s*([a-z_]+):\s*"([0-9.]+)",`)
+
+// codename names the running macOS the way Homebrew does in its package
+// file names. Homebrew's own table decides, so a macOS it doesn't list yet
+// is an error: brew update, which also updates the table, is the fix.
+func (m Module) codename(env module.Env) (string, error) {
+	major, err := macos.MajorVersion(env.Ctx, env.Run)
+	if err != nil {
+		return "", err
 	}
-	return slices.ContainsFunc(dirs, hasSignedData)
+	table := filepath.Join(filepath.Dir(filepath.Dir(m.Brew)), "Library", "Homebrew", "macos_version.rb")
+	releases, err := readReleases(table)
+	if err != nil {
+		return "", err
+	}
+	name, ok := releases[major]
+	if !ok {
+		return "", fmt.Errorf("Homebrew doesn't know macOS %s yet", major)
+	}
+	return name, nil
 }
 
-func hasSignedData(dir string) bool {
-	entries, _ := os.ReadDir(dir)
-	for _, e := range entries {
-		if !strings.HasSuffix(e.Name(), ".jws.json") {
-			continue
-		}
-		if info, err := os.Stat(filepath.Join(dir, e.Name())); err == nil && info.Mode().IsRegular() && info.Size() > 0 {
-			return true
+// readReleases maps each macOS major to its codename from the RELEASES
+// block of Homebrew's macos_version.rb.
+func readReleases(path string) (map[string]string, error) {
+	text, err := os.ReadFile(path)
+	if err != nil {
+		return nil, fmt.Errorf("read Homebrew's macOS table: %w", err)
+	}
+	releases := map[string]string{}
+	inBlock := false
+	for _, line := range strings.Split(string(text), "\n") {
+		switch {
+		case strings.Contains(line, "RELEASES = T.let({"):
+			inBlock = true
+		case inBlock && strings.HasPrefix(strings.TrimSpace(line), "}"):
+			return releases, nil
+		case inBlock:
+			if m := releaseLine.FindStringSubmatch(line); m != nil {
+				releases[m[2]] = m[1]
+			}
 		}
 	}
-	return false
+	return releases, nil
 }
 
 func (m Module) services(env module.Env) ([]Service, error) {
@@ -347,11 +383,11 @@ func (m Module) Prepare(env module.Env, st *stage.Stage) (module.Result, error) 
 }
 
 // keepPrevious ends prepare with problem but keeps the earlier record, so
-// finish still starts what an earlier run stopped. With no earlier record
-// it fails instead: an empty record would read as "Homebrew not
-// installed", and verify would skip Homebrew.
+// finish still starts what an earlier run stopped. Without an earlier
+// record of an installed Homebrew it fails instead: keeping an empty record
+// would read as "Homebrew not installed", and verify would skip Homebrew.
 func keepPrevious(previous Inventory, recorded bool, problem module.Finding) (module.Result, error) {
-	if !recorded {
+	if !recorded || !previous.Installed {
 		return module.Result{}, errors.New(describe(problem))
 	}
 	return module.Result{Inventory: previous, Problems: []module.Finding{problem}}, nil

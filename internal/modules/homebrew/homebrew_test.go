@@ -55,6 +55,18 @@ var (
 	notLoaded = runner.Response{Code: 113, Stderr: "Bad request.\nCould not find service \"" + unboundLabel + "\" in domain for system\n"}
 )
 
+// macosVersionRB is the part of Homebrew 7's macos_version.rb that maps
+// codenames to macOS majors, with one release newer than this Mac's.
+const macosVersionRB = `module MacOSVersion
+  RELEASES = T.let({
+    golden_gate: "27",
+    tahoe:       "26",
+    sequoia:     "15",
+    sonoma:      "14",
+  }.freeze, T::Hash[Symbol, String])
+end
+`
+
 type fixture struct {
 	home  string
 	cache string
@@ -69,7 +81,8 @@ func newFixture(t *testing.T) fixture {
 	brew := filepath.Join(root, "homebrew", "bin", "brew")
 	testutil.WriteFile(t, brew, "")
 	cache := filepath.Join(root, "Caches", "Homebrew")
-	testutil.WriteFile(t, filepath.Join(cache, "api", "formula.jws.json"), `{"payload":"[]"}`)
+	testutil.WriteFile(t, filepath.Join(cache, "api", "internal", "packages.arm64_tahoe.jws.json"), `{"payload":"[]"}`)
+	testutil.WriteFile(t, filepath.Join(root, "homebrew", "Library", "Homebrew", "macos_version.rb"), macosVersionRB)
 	home := filepath.Join(root, "home")
 	if err := os.MkdirAll(home, 0o700); err != nil {
 		t.Fatal(err)
@@ -78,8 +91,9 @@ func newFixture(t *testing.T) fixture {
 	if err != nil {
 		t.Fatal(err)
 	}
-	f := fixture{home: home, cache: cache, mod: Module{Brew: brew, User: "dev"}, fake: &runner.Fake{Responses: map[string]runner.Response{}}, st: st}
+	f := fixture{home: home, cache: cache, mod: Module{Brew: brew, User: "dev", Getenv: func(string) string { return "" }}, fake: &runner.Fake{Responses: map[string]runner.Response{}}, st: st}
 	f.respond("--cache", runner.Response{Stdout: cache + "\n"})
+	f.fake.Responses["/usr/bin/sw_vers -productVersion"] = runner.Response{Stdout: "26.7.1\n"}
 	f.respond("services list --json", runner.Response{Stdout: listJSON})
 	f.respond("bundle dump --file=- --formula --cask --tap --mas", runner.Response{Stdout: "tap \"homebrew/core\"\nbrew \"git\"\n"})
 	for _, name := range []string{"mysql", "postgresql@16", "redis"} {
@@ -547,32 +561,6 @@ func TestVerifyWithoutPackageDataWarnsOnce(t *testing.T) {
 	}
 }
 
-func TestHasPackageData(t *testing.T) {
-	tests := []struct {
-		name  string
-		files map[string]string
-		want  bool
-	}{
-		{"formula data", map[string]string{"formula.jws.json": "{}"}, true},
-		{"one folder below", map[string]string{"internal/packages.arm64_tahoe.jws.json": "{}"}, true},
-		{"empty file", map[string]string{"formula.jws.json": ""}, false},
-		{"two folders below", map[string]string{"a/b/formula.jws.json": "{}"}, false},
-		{"names only", map[string]string{"formula_names.txt": "git\n"}, false},
-		{"no api folder", nil, false},
-	}
-	for _, tt := range tests {
-		t.Run(tt.name, func(t *testing.T) {
-			api := filepath.Join(t.TempDir(), "api")
-			for rel, content := range tt.files {
-				testutil.WriteFile(t, filepath.Join(api, filepath.FromSlash(rel)), content)
-			}
-			if got := hasPackageData(api); got != tt.want {
-				t.Errorf("hasPackageData = %v, want %v", got, tt.want)
-			}
-		})
-	}
-}
-
 func TestUndoWithNothingForHomebrewToUndoRunsNoCommand(t *testing.T) {
 	tests := []struct {
 		name string
@@ -607,5 +595,112 @@ func TestFinishWithNothingToRestartRunsNoCommand(t *testing.T) {
 	}
 	if calls := f.fake.Calls(); len(calls) != 0 {
 		t.Errorf("ran %v; want no command", calls)
+	}
+}
+
+func (f fixture) setMacOS(version string) {
+	f.fake.Responses["/usr/bin/sw_vers -productVersion"] = runner.Response{Stdout: version + "\n"}
+}
+
+func (f fixture) cacheErr(t *testing.T) error {
+	t.Helper()
+	return f.mod.checkCache(f.env(nil))
+}
+
+func TestCheckCacheNeedsTheFileForTheRunningMacOS(t *testing.T) {
+	tests := []struct {
+		name    string
+		macos   string
+		files   map[string]string
+		version string
+		env     string
+		wantErr string
+	}{
+		{name: "tahoe file on macOS 26", macos: "26.7.1"},
+		{name: "only the tahoe file on macOS 27", macos: "27.0", wantErr: "packages.arm64_golden_gate.jws.json"},
+		{name: "golden gate file on macOS 27", macos: "27.0", files: map[string]string{"packages.arm64_golden_gate.jws.json": "{}"}},
+		{name: "empty file", macos: "26.7.1", files: map[string]string{"packages.arm64_tahoe.jws.json": ""}, wantErr: "packages.arm64_tahoe.jws.json"},
+		{name: "macOS newer than Homebrew's table", macos: "28.0", wantErr: "doesn't know macOS 28"},
+		{name: "table missing", macos: "26.7.1", version: "delete", wantErr: "macos_version.rb"},
+		{name: "table without releases", macos: "26.7.1", version: "module MacOSVersion\nend\n", wantErr: "doesn't know macOS 26"},
+		{name: "opt-out needs no files", macos: "28.0", env: "1"},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			f := newFixture(t)
+			f.setMacOS(tt.macos)
+			for rel, content := range tt.files {
+				testutil.WriteFile(t, filepath.Join(f.cache, "api", "internal", rel), content)
+			}
+			table := filepath.Join(filepath.Dir(filepath.Dir(f.mod.Brew)), "Library", "Homebrew", "macos_version.rb")
+			switch tt.version {
+			case "delete":
+				if err := os.Remove(table); err != nil {
+					t.Fatal(err)
+				}
+			case "":
+			default:
+				testutil.WriteFile(t, table, tt.version)
+			}
+			if tt.env != "" {
+				f.emptyCache(t)
+				f.mod.Getenv = func(k string) string {
+					if k == "HOMEBREW_NO_INSTALL_FROM_API" {
+						return tt.env
+					}
+					return ""
+				}
+			}
+			err := f.cacheErr(t)
+			if tt.wantErr == "" && err != nil {
+				t.Errorf("checkCache = %v, want nil", err)
+			}
+			if tt.wantErr != "" && (err == nil || !strings.Contains(err.Error(), tt.wantErr)) {
+				t.Errorf("checkCache = %v, want an error naming %q", err, tt.wantErr)
+			}
+		})
+	}
+}
+
+func TestCheckCacheOnlyReadsTheMacOSVersionWhenItNeedsTheFile(t *testing.T) {
+	f := newFixture(t)
+	f.mod.Getenv = func(string) string { return "1" }
+	delete(f.fake.Responses, "/usr/bin/sw_vers -productVersion")
+	if err := f.cacheErr(t); err != nil {
+		t.Errorf("checkCache = %v, want nil with the opt-out set", err)
+	}
+}
+
+func TestEveryBrewCommandUnsetsForcedAPIUpdates(t *testing.T) {
+	f := newFixture(t)
+	if _, err := f.mod.Prepare(f.env(manifest.New("test")), f.st); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.mod.Verify(f.env(record(t, stoppedEarlier())), f.st); err != nil {
+		t.Fatal(err)
+	}
+	checked := 0
+	for _, c := range f.fake.Calls() {
+		if c.Name != f.mod.Brew {
+			continue
+		}
+		checked++
+		if !slices.Contains(c.Unset, "HOMEBREW_FORCE_API_AUTO_UPDATE") {
+			t.Errorf("%s doesn't unset HOMEBREW_FORCE_API_AUTO_UPDATE", c.String())
+		}
+	}
+	if checked == 0 {
+		t.Fatal("no brew command ran")
+	}
+}
+
+func TestKeepPreviousFailsWhenThePreviousRecordSaysNotInstalled(t *testing.T) {
+	problem := module.Finding{Title: "Could not list Homebrew services", Fix: "fix it"}
+	if _, err := keepPrevious(Inventory{}, true, problem); err == nil {
+		t.Error("keepPrevious kept a record that says Homebrew isn't installed")
+	}
+	res, err := keepPrevious(Inventory{Installed: true}, true, problem)
+	if err != nil || len(res.Problems) != 1 {
+		t.Errorf("keepPrevious = %+v, %v; want the installed record kept", res, err)
 	}
 }

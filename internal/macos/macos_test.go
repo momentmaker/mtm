@@ -75,3 +75,26 @@ func TestShellQuote(t *testing.T) {
 		}
 	}
 }
+
+func TestMajorVersion(t *testing.T) {
+	tests := []struct {
+		name string
+		resp runner.Response
+		want string
+		fail bool
+	}{
+		{"patch release", runner.Response{Stdout: "26.7.1\n"}, "26", false},
+		{"no patch", runner.Response{Stdout: "15.6\n"}, "15", false},
+		{"sw_vers fails", runner.Response{Code: 1, Stderr: "boom"}, "", true},
+		{"empty output", runner.Response{Stdout: "\n"}, "", true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			f := &runner.Fake{Responses: map[string]runner.Response{"/usr/bin/sw_vers -productVersion": tt.resp}}
+			got, err := MajorVersion(ctx, f)
+			if got != tt.want || (err != nil) != tt.fail {
+				t.Errorf("MajorVersion = %q, %v; want %q, fail=%v", got, err, tt.want, tt.fail)
+			}
+		})
+	}
+}
