@@ -55,6 +55,7 @@ Found in the final review and its re-review.
 - **finish:** exits 1 whenever manual steps remain. `finish --only` is missing; Stage 3 needs it for Docker.
 - **system:** Apple-managed `paths.d` files can be suggested for overwrite (suggest a diff instead). Apps with the same bundle id collapse across roots. An unreadable vendor folder skips its apps silently.
 - **loginitems:** symlinked agent plists are skipped. Login item names containing ", " split wrongly. Its scan can't be tested inside `sandbox-exec`, because launchctl is unavailable there.
+- **Root-only undo:** when the record holds only root services, `undo` and `finish` still check brew's package cache, though they only print sudo commands for those. A cold cache then blocks for no benefit.
 - **Sandboxing brew isn't possible:** `launchctl list` returns nothing under `sandbox-exec`, so `brew services` would misreport running services.
 - **Defense in depth:** consider running every external command mtm launches (brew, the login shell, tool `--version`) under the deny-network sandbox.
 
