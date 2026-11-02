@@ -21,7 +21,7 @@ import (
 // which launchctl and brew services need.
 const denyNetwork = "(version 1)(allow default)(deny network-outbound (remote ip))"
 
-func requireIntegrationHost(t *testing.T) {
+func requireIntegrationHost(t *testing.T) string {
 	t.Helper()
 	if runtime.GOOS != "darwin" || runtime.GOARCH != "arm64" {
 		t.Skip("needs an Apple Silicon Mac")
@@ -33,6 +33,13 @@ func requireIntegrationHost(t *testing.T) {
 	if _, err := os.Stat(brew); err != nil {
 		t.Skip("needs Homebrew in /opt/homebrew")
 	}
+	cacheCmd := exec.Command(brew, "--cache")
+	cacheCmd.Env = append(os.Environ(), "HOMEBREW_NO_AUTO_UPDATE=1")
+	cacheOut, err := cacheCmd.Output()
+	if err != nil {
+		t.Fatalf("brew --cache: %v", err)
+	}
+	cache := strings.TrimSpace(string(cacheOut))
 	cmd := exec.Command(brew, "services", "list", "--json")
 	cmd.Env = append(os.Environ(), "HOMEBREW_NO_AUTO_UPDATE=1")
 	out, err := cmd.Output()
@@ -55,6 +62,7 @@ func requireIntegrationHost(t *testing.T) {
 			t.Skip("Homebrew services are running; prepare would stop them on this Mac")
 		}
 	}
+	return cache
 }
 
 // TestNoNetwork runs mtm under a sandbox that denies network access, with
@@ -62,7 +70,7 @@ func requireIntegrationHost(t *testing.T) {
 // must work offline. loginitems is left out because it asks System Events,
 // which would show a permission prompt.
 func TestNoNetwork(t *testing.T) {
-	requireIntegrationHost(t)
+	cache := requireIntegrationHost(t)
 	bin := filepath.Join(t.TempDir(), "mtm")
 	if out, err := exec.Command("go", "build", "-o", bin, ".").CombinedOutput(); err != nil {
 		t.Fatalf("go build: %v\n%s", err, out)
@@ -81,7 +89,10 @@ func TestNoNetwork(t *testing.T) {
 	}
 	for _, s := range steps {
 		cmd := exec.Command("/usr/bin/sandbox-exec", append([]string{"-p", denyNetwork, bin}, s.args...)...)
-		cmd.Env = append(os.Environ(), "HOME="+home)
+		// The temp home would hide Homebrew's API cache, which every real
+		// install has; with no cache brew downloads formula data. That
+		// empty-cache case is tracked separately.
+		cmd.Env = append(os.Environ(), "HOME="+home, "HOMEBREW_CACHE="+cache)
 		out, err := cmd.CombinedOutput()
 		code := 0
 		var exitErr *exec.ExitError
