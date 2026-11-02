@@ -109,6 +109,24 @@ func TestListMissingRootIsEmpty(t *testing.T) {
 	}
 }
 
+func TestIntelOnly(t *testing.T) {
+	tests := []struct {
+		archs []string
+		want  bool
+	}{
+		{[]string{"x86_64"}, true},
+		{[]string{"x86_64", "arm64"}, false},
+		{[]string{"x86_64", "arm64e"}, false},
+		{[]string{"arm64e"}, false},
+		{nil, false},
+	}
+	for _, tt := range tests {
+		if got := (App{Archs: tt.archs}).IntelOnly(); got != tt.want {
+			t.Errorf("IntelOnly(%q) = %v, want %v", tt.archs, got, tt.want)
+		}
+	}
+}
+
 func TestCompare(t *testing.T) {
 	tests := []struct {
 		a, b string

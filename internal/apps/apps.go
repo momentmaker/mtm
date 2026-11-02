@@ -24,9 +24,10 @@ type App struct {
 	Archs    []string `json:"archs,omitempty"`
 }
 
-// IntelOnly reports an app that needs Rosetta on Apple Silicon.
+// IntelOnly reports an app that needs Rosetta on Apple Silicon. arm64e,
+// the pointer-authentication variant, runs natively too.
 func (a App) IntelOnly() bool {
-	return len(a.Archs) > 0 && !slices.Contains(a.Archs, "arm64")
+	return len(a.Archs) > 0 && !slices.Contains(a.Archs, "arm64") && !slices.Contains(a.Archs, "arm64e")
 }
 
 // Root is a folder of applications. Display replaces Dir in recorded paths,
