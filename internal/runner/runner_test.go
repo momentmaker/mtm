@@ -7,6 +7,7 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+	"time"
 )
 
 func TestExecCapturesStdout(t *testing.T) {
@@ -66,6 +67,17 @@ func TestExecUnsetsVariablesBeforeAddingEnv(t *testing.T) {
 	}
 	if got := string(out.Stdout); got != "unset|kept|added" {
 		t.Errorf("stdout = %q, want %q", got, "unset|kept|added")
+	}
+}
+
+func TestExecDoesNotWaitForABackgroundChildHoldingStdout(t *testing.T) {
+	start := time.Now()
+	out, err := Exec{}.Run(context.Background(), Command{Name: "/bin/sh", Args: []string{"-c", "sleep 5 & echo hi"}})
+	if elapsed := time.Since(start); elapsed > 4*time.Second {
+		t.Errorf("Run took %s, want it to return soon after the shell exits", elapsed)
+	}
+	if err != nil || string(out.Stdout) != "hi\n" {
+		t.Errorf("Run = %q, %v; want \"hi\\n\", nil", out.Stdout, err)
 	}
 }
 
