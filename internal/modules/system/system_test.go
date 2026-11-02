@@ -191,7 +191,7 @@ func TestFinishPrintsRestoreCommands(t *testing.T) {
 	for _, p := range res.Problems {
 		fixes[p.ID] = p.Fix
 	}
-	if want := "sudo cp '" + st.Path("exports", "etc", "hosts") + "' /etc/hosts"; !strings.Contains(fixes["etc:hosts"], want) {
+	if want := "sudo cp '" + st.Path("exports", "etc", "hosts") + "' '/etc/hosts'"; !strings.Contains(fixes["etc:hosts"], want) {
 		t.Errorf("hosts fix = %q, want it to contain %q", fixes["etc:hosts"], want)
 	}
 	if !strings.Contains(fixes["rosetta"], "softwareupdate --install-rosetta") {
@@ -224,5 +224,26 @@ func TestScanSummarizes(t *testing.T) {
 	}
 	if want := []string{"apps", "shell", "intel-only"}; !slices.Equal(ids, want) {
 		t.Errorf("finding ids = %q, want %q", ids, want)
+	}
+}
+
+func TestFinishQuotesEtcDestination(t *testing.T) {
+	f := newFixture(t)
+	rel := "paths.d/my tool's"
+	testutil.WriteFile(t, filepath.Join(f.etc, filepath.FromSlash(rel)), "/opt/tool/bin\n")
+	m, st, _ := f.prepare(t)
+	testutil.WriteFile(t, filepath.Join(f.etc, filepath.FromSlash(rel)), "/opt/other/bin\n")
+	res, err := f.module().Finish(f.env(m), st)
+	if err != nil {
+		t.Fatal(err)
+	}
+	var fix string
+	for _, p := range res.Problems {
+		if p.ID == "etc:"+rel {
+			fix = p.Fix
+		}
+	}
+	if want := `'/etc/paths.d/my tool'\''s'`; !strings.Contains(fix, want) {
+		t.Errorf("fix = %q, want it to contain %q", fix, want)
 	}
 }

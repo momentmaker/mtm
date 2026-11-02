@@ -183,7 +183,7 @@ func (m Module) Finish(env module.Env, st *stage.Stage) (module.Result, error) {
 			continue
 		}
 		res.Problems = append(res.Problems, byHand("etc:"+rel, "/etc/"+rel+" differs from the old Mac",
-			"Review the old copy, then restore it with: sudo cp "+macos.ShellQuote(st.Path(etcExport, filepath.FromSlash(rel)))+" /etc/"+rel))
+			"Review the old copy, then restore it with: sudo cp "+macos.ShellQuote(st.Path(etcExport, filepath.FromSlash(rel)))+" "+macos.ShellQuote("/etc/"+rel)))
 	}
 	if hasIntelOnly(old.Apps) && !m.rosettaInstalled() {
 		res.Problems = append(res.Problems, byHand("rosetta", "Intel-only apps need Rosetta", "Run: sudo softwareupdate --install-rosetta --agree-to-license"))
