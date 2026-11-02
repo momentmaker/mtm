@@ -40,8 +40,8 @@ func walkHome(ctx context.Context, home string, skip pathset.Set, emit func(item
 	return w.walk()
 }
 
-// walker holds one walk. otherVolume is a field so tests can stand in a
-// mount point, which a test can't create.
+// walker holds one walk. otherVolume is a field so unit tests can stand in
+// a mount point without attaching a real volume.
 type walker struct {
 	ctx         context.Context
 	home        string
