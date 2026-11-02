@@ -170,7 +170,8 @@ type Module interface {
     Verify(env Env, st *stage.Stage) ([]Check, error)
 }
 ```
-- `Env` carries the runner, home directory, catalog, logger, and the current mode (old Mac or new Mac).
+- `Env` carries the runner, home directory, catalog, and the current mode (old Mac or new Mac). Logging wraps the runner. `Env.Manifest` is the record: on the new Mac it is what `verify` and `finish` check against; during `prepare` it holds this Mac's previous record, if any, so a re-run can carry forward what the first run changed (for example, services it stopped).
+- Modules whose `prepare` changes the old Mac also implement `Undo(env, st) (Result, error)`, which `prepare --undo` calls. After a successful undo, that module's record is removed, so `verify` reports it not prepared until `prepare` runs again.
 - `Finding` has: module, id, severity (`info`, `warn`, `blocker`), handler (`migration-assistant`, `mtm`, `manual`), title, detail, fix.
 - `Result` has: what was done, artifacts written (each with its fingerprint), checklist items to add, and problems.
 - `Check` has: module, id, status (`pass`, `fail`, `warn`, `info`), critical flag, title, detail.
@@ -283,15 +284,32 @@ Otherwise **NOT SAFE TO WIPE**, followed by the blocking items. Exit codes: `0` 
 
 ### 9.3 `homebrew`
 - Every `brew` command runs with `HOMEBREW_NO_AUTO_UPDATE=1` and `HOMEBREW_NO_ANALYTICS=1`, so Homebrew makes no network calls on `mtm`'s behalf (section 6.2, rule 2). A test runs each `brew` command `mtm` uses under a `sandbox-exec` profile that denies network access and asserts it still succeeds (section 11).
-- `scan` and `prepare` record the output of `brew services list --json`, plus `brew bundle dump --file ~/.mtm/Brewfile --describe` as a fallback.
-- **`prepare`:** stops running user services with `brew services stop` and records which ones were running. Services running as root are printed as `sudo brew services stop <name>` for the user to run.
-- **`finish`:** restarts the services that were running, printing the same kind of commands for root services.
-- **`verify`:** `brew bundle check --file ~/.mtm/Brewfile`, and services that were running are running.
+- `scan` and `prepare` record the output of `brew services list --json`. `prepare` also saves `brew bundle dump --file=- --formula --cask --tap --mas` into `~/.mtm/Brewfile` (written by `mtm` with mode 0600). The type flags matter: without them, `brew bundle dump` also asks cargo, go, npm, and VS Code for their packages, and cargo's rustup reaches the network. Homebrew has removed `--describe`, and the dump now includes descriptions by default.
+- **`prepare`:**
+  - Stops running services that run as the user, with `brew services stop`, and records which ones it stopped.
+  - On a re-run, services the earlier run stopped stay recorded as stopped, so `finish` still restarts them.
+  - Services running as root (or as another user) are printed as `sudo brew services stop <name>` for the user to run.
+  - A service that fails to stop is a blocker, because its data would be copied mid-write.
+- **`prepare --undo`:** restarts what `prepare` stopped. Root services are printed as `sudo brew services start` commands.
+- **`finish`:** restarts the same services on the new Mac, printing the same kind of commands for root services.
+- **`verify`:**
+  - Homebrew is present, which is a fail otherwise.
+  - `brew bundle check --file ~/.mtm/Brewfile --no-upgrade --verbose`: missing packages are a warn, with the `brew bundle install` command.
+  - Services that were running are running again, which is a warn otherwise.
 
 ### 9.4 `toolchains`
-- Records path and version for: brew, git, node, npm, pnpm, bun, deno, python3, uv, go, rustc, cargo, ruby, java, asdf, mise. Each is resolved through the user's login shell (`$SHELL -l -c 'command -v X; X --version'`), so dotfile-configured PATH is respected.
-- Also records the global `~/.tool-versions` and `mise` config.
-- `verify` requires the same paths and versions on the new Mac. A difference is a fail with both values shown.
+- Records path and version for: brew, git, node, npm, pnpm, bun, deno, python3, uv, go, rustc, cargo, ruby, java, asdf, mise.
+- **Finding the PATH:**
+  - The login shell comes from `dscl . -read /Users/<user> UserShell`. It may be fish, not `$SHELL`.
+  - The PATH is read from that shell once:
+    - fish uses `-l -c`;
+    - zsh and bash use `-l -i -c`, because developers often set PATH in `.zshrc` or `.bashrc`, which only interactive shells read;
+    - other shells use `-l -c`.
+  - The shell prints the PATH after a marker, so stray output from startup files and a non-zero exit after printing don't matter. The shell has a 20-second timeout.
+  - Each tool is then found in that PATH and run directly (`--version`; `go version`; `java -version` on stderr), with a 10-second timeout.
+- Paths inside the home folder are recorded as `~/…`, so they compare across usernames.
+- The global `~/.tool-versions` and `mise` config are dotfiles, which the `files` module already fingerprints.
+- `verify` requires the same paths and versions on the new Mac. A difference, a missing tool, or a login shell that no longer prints a PATH is a fail, with both values shown.
 
 ### 9.5 `docker` (Docker Desktop)
 - **`scan`:**
@@ -318,10 +336,10 @@ Otherwise **NOT SAFE TO WIPE**, followed by the blocking items. Exit codes: `0` 
 - Postgres running inside Docker is covered by the `docker` module.
 
 ### 9.7 `loginitems`
-- Records launch agents in `~/Library/LaunchAgents` and whether each is loaded (`launchctl print gui/<uid>`).
-- Records login items through System Events, which triggers a one-time Automation permission prompt explained to the user beforehand.
-- `finish` bootstraps the launch agents that were loaded (`launchctl bootstrap gui/<uid> <plist>`) and adds checklist items for app-registered login items and background-item approvals.
-- `verify` checks the same agents are loaded.
+- Records each launch agent in `~/Library/LaunchAgents` (`*.plist` only), with its `Label` and whether it is loaded (`launchctl list`).
+- `prepare`, not `scan`, records login items through System Events (`osascript`). That triggers a one-time Automation permission prompt, which `scan` explains beforehand. If access is denied, `prepare` warns and asks the user to note their login items by hand.
+- `finish` bootstraps the launch agents that were loaded and aren't now (`launchctl bootstrap gui/<uid> <plist>`). A failure becomes a by-hand step pointing at Login Items approvals. `finish` also lists the login items to add again. Until Stage 4's checklist exists, these print as by-hand steps.
+- `verify` warns when an agent that was loaded isn't now, and lists the login items to add again (info).
 
 ### 9.8 `permissions`
 - **With Full Disk Access:** reads grants from the user and system privacy permissions databases with `/usr/bin/sqlite3` in read-only mode. Records service and client only.
@@ -351,20 +369,26 @@ Otherwise **NOT SAFE TO WIPE**, followed by the blocking items. Exit codes: `0` 
 
 ### 9.11 `system`
 - **Recorded:**
-  - FileVault status and macOS version;
+  - FileVault status and macOS version, in the manifest by preflight;
   - login shell (`dscl . -read /Users/<user> UserShell`) and whether `/etc/shells` lists it;
-  - fingerprints of `/etc/hosts`, `/etc/shells`, `/etc/paths.d/*`, `/etc/pam.d/sudo_local` (Touch ID for sudo);
-  - app inventory of `/Applications` (bundle id, version, architectures via `lipo -archs`).
-- **`scan`:** flags Intel-only apps. They need Rosetta on the new Mac, and Rosetta is limited after macOS 27.
-- **`finish`:** prints `sudo softwareupdate --install-rosetta --agree-to-license` if needed, and fixes for any `/etc` file that differs.
-- **`verify`:** same shell and `/etc` fingerprints (warn), and every app present at the same version or newer.
+  - fingerprints of `/etc/hosts`, `/etc/shells`, `/etc/paths.d/*`, `/etc/pam.d/sudo_local` (Touch ID for sudo). Copies go into `~/.mtm/exports/etc/` so `finish` can print an exact restore command. These files hold configuration, not secrets;
+  - app inventory of `/Applications` and `~/Applications`, including one level of subfolders, skipping Apple's own `com.apple.*` apps and symlinks. Each app records its bundle id, version (`plutil -extract … raw`), and architectures (`lipo -archs`). Home apps are recorded as `~/Applications/…`.
+- **`scan` and `prepare`:** warn about Intel-only apps. They need Rosetta on the new Mac, and Rosetta is limited after macOS 27.
+- **`finish`:** prints `sudo softwareupdate --install-rosetta --agree-to-license` if Rosetta is needed and missing. Also prints `sudo cp ~/.mtm/exports/etc/<file> /etc/<file>` for each `/etc` file that differs, and `chsh -s <shell>` (after adding the shell to `/etc/shells`, if needed) when the login shell changed. Paths are shell-quoted.
+- **`verify`:**
+  - The recorded login shell must exist: fail.
+  - A changed shell, or one not listed in `/etc/shells`: warn.
+  - A changed or missing `/etc` file: warn.
+  - Every app must be present by bundle id: a missing app is a fail, because a discontinued or paid app may be impossible to get again. An older version is a warn.
+  - Rosetta missing while Intel-only apps exist: warn.
 
 ## 10. Error handling
 - **Fail fast, with context.** Every error names the module, the step, the command that failed, its exit code, and the next action. Example: `docker: export failed: Docker Desktop is not running. Start it and run: mtm prepare --only docker`.
 - **Report everything.** `scan` and `verify` run every module and report every problem. One module's error becomes a failed check for that module, not an abort.
 - **Clear readiness.** If any module fails in `prepare`, the run ends with **NOT READY FOR MIGRATION ASSISTANT** and exit code `1`. The modules that succeeded keep their results.
 - **Re-runnable.** Each step records completion and the fingerprints of its inputs in the manifest. A re-run skips completed steps whose inputs are unchanged.
-- **Undo for the old Mac.** `prepare --undo` restarts the services and containers `prepare` stopped, for when the user calls off the migration.
+- **Undo for the old Mac.** `prepare --undo` restarts the services and containers `prepare` stopped, for when the user calls off the migration. It runs only on the Mac that ran `prepare`. It removes the undone modules' records, so a later `verify` reports them not prepared rather than trusting a record of a state that no longer holds.
+- **`finish` on the wrong Mac.** `finish` refuses to run on the Mac that ran `prepare`, because it would restart services there. Like `prepare`, it refuses without FileVault.
 - **Free space.** Each export checks free space first and keeps at least 10 GB free. If an export will not fit, `prepare` stops before writing it and suggests `--stage` on an encrypted external volume.
 - **Migration Assistant problems.** `verify` lists what is missing. `mtm` explains the options: copy the specific missing paths from the old Mac, or erase the new Mac and run Migration Assistant again during first-boot setup.
 - **Wrong Mac.** `prepare` refuses to overwrite a record made on a different Mac (for example, run by mistake on the new Mac after migration) and points to `mtm verify`. `verify` fails when run on the Mac that ran `prepare`. `cleanup` needs a SAFE TO WIPE result from a full `verify` (not one limited with `--only`) on the same Mac, or `--force`.
