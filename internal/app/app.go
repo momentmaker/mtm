@@ -7,7 +7,9 @@ import (
 	"errors"
 	"fmt"
 	"io/fs"
+	"maps"
 	"os"
+	"slices"
 	"strings"
 	"time"
 
@@ -111,7 +113,7 @@ func (a *App) Prepare(ctx context.Context, opts PrepareOptions) (PrepareReport, 
 		m = manifest.New(a.Version)
 	case err != nil:
 		return rep, err
-	case m.MachineID != "" && m.MachineID != info.MachineID:
+	case m.MachineID != info.MachineID:
 		return rep, fmt.Errorf("%w (recorded %s). If this is the new Mac, run mtm verify instead", ErrOtherMacsRecord, m.PreparedAt.Local().Format(time.RFC1123))
 	}
 	m.MtmVersion = a.Version
@@ -209,6 +211,9 @@ func (a *App) Verify(ctx context.Context, opts VerifyOptions) (VerifyReport, err
 		}
 		checks = append(checks, cs...)
 	}
+	if len(opts.Only) == 0 {
+		checks = append(checks, a.unknownModules(m)...)
+	}
 
 	v := verdict.Decide(checks, nil)
 	s, err := state.Load(st)
@@ -245,6 +250,23 @@ func (a *App) Cleanup(force bool) (bool, error) {
 		return false, err
 	}
 	return true, nil
+}
+
+// unknownModules fails each module in the record that this mtm can't
+// verify. A newer mtm recorded data this one would otherwise skip silently.
+func (a *App) unknownModules(m *manifest.Manifest) []module.Check {
+	var checks []module.Check
+	for _, name := range slices.Sorted(maps.Keys(m.Modules)) {
+		if slices.ContainsFunc(a.Modules, func(mod module.Module) bool { return mod.Name() == name }) {
+			continue
+		}
+		checks = append(checks, module.Check{
+			Module: name, ID: name + ":unknown", Status: module.StatusFail, Critical: true,
+			Title:  name + " was recorded by a newer mtm",
+			Detail: "upgrade mtm on this Mac and run mtm verify again",
+		})
+	}
+	return checks
 }
 
 func (a *App) env(ctx context.Context, machine module.Machine, deep bool, m *manifest.Manifest, run runner.Runner) module.Env {

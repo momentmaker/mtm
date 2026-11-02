@@ -76,3 +76,21 @@ func TestSetModuleKeepsLatestPreparedAt(t *testing.T) {
 		t.Errorf("PreparedAt = %v, want %v", m.PreparedAt, later)
 	}
 }
+
+func TestLoadRejectsIncompleteManifest(t *testing.T) {
+	for name, data := range map[string]string{
+		"schema 0":         `{"schema": 0, "machine_id": "sha256:ab"}`,
+		"no schema":        `{"machine_id": "sha256:ab"}`,
+		"no machine id":    `{"schema": 1}`,
+		"empty object":     `{}`,
+		"empty machine id": `{"schema": 1, "machine_id": ""}`,
+	} {
+		t.Run(name, func(t *testing.T) {
+			st := openStage(t)
+			st.WriteFile(FileName, []byte(data))
+			if _, err := Load(st); !errors.Is(err, ErrInvalidManifest) {
+				t.Errorf("err = %v, want ErrInvalidManifest", err)
+			}
+		})
+	}
+}

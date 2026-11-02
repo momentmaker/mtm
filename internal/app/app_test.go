@@ -374,3 +374,36 @@ func TestFailedPrepareRerunDropsTheStaleRecord(t *testing.T) {
 		t.Errorf("safe = %v, blocking = %v; want files:not-prepared blocking", got.Verdict.Safe, blockingIDs(got))
 	}
 }
+
+func TestVerifyFailsOnModuleRecordedByNewerMtm(t *testing.T) {
+	old := seedHome(t)
+	prepareOld(t, old)
+	st, err := stage.Existing(old)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m, err := manifest.Load(st)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := m.SetModule("docker", m.PreparedAt, map[string]int{"volumes": 2}); err != nil {
+		t.Fatal(err)
+	}
+	if err := manifest.Save(st, m); err != nil {
+		t.Fatal(err)
+	}
+	newHome := migrate(t, old)
+
+	rep := verifyOn(t, newHome, newUUID, VerifyOptions{})
+	if rep.Verdict.Safe || !slices.Contains(blockingIDs(rep), "docker:unknown") {
+		t.Fatalf("safe = %v, blocking = %v; want docker:unknown blocking", rep.Verdict.Safe, blockingIDs(rep))
+	}
+	i := slices.IndexFunc(rep.Checks, func(c module.Check) bool { return c.ID == "docker:unknown" })
+	if c := rep.Checks[i]; !c.Critical || c.Title != "docker was recorded by a newer mtm" || !strings.Contains(c.Detail, "upgrade mtm") {
+		t.Errorf("check = %+v", c)
+	}
+	only := verifyOn(t, newHome, newUUID, VerifyOptions{Only: []string{"files"}})
+	if slices.ContainsFunc(only.Checks, func(c module.Check) bool { return c.ID == "docker:unknown" }) {
+		t.Error("verify --only files reported the unknown module")
+	}
+}

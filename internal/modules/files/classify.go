@@ -35,15 +35,19 @@ type Observed struct {
 // Classify applies spec section 8.4 to one recorded entry. A file modified
 // after prepare is a normal change, not damage. Folders are checked for
 // presence only, because their times change whenever an entry is added.
+// An entry type this mtm doesn't know comes from a newer or damaged record
+// and can't be verified, so it fails.
 func Classify(rec manifest.Entry, obs Observed, preparedAt int64, isVolatile func(string) bool) Outcome {
 	switch {
+	case !knownType(rec.Type):
+		return Corrupt
 	case rec.Type == manifest.TypeCloud:
 		return CloudOnly
 	case rec.Type == manifest.TypeUnreadable:
 		return NotChecked
 	case !obs.Exists && isVolatile(rec.Path):
 		return MissingVolatile
-	case !obs.Exists && rec.Area == manifest.AreaCritical:
+	case !obs.Exists && isCritical(rec.Area):
 		return MissingCritical
 	case !obs.Exists:
 		return MissingAppState
@@ -63,10 +67,24 @@ func Classify(rec manifest.Entry, obs Observed, preparedAt int64, isVolatile fun
 	return Match
 }
 
+func knownType(t string) bool {
+	switch t {
+	case manifest.TypeFile, manifest.TypeDir, manifest.TypeLink, manifest.TypeCloud, manifest.TypeUnreadable:
+		return true
+	}
+	return false
+}
+
+// isCritical treats any area other than app state as critical, so an area
+// added by a newer mtm, or a damaged one, fails safe.
+func isCritical(area string) bool {
+	return area != manifest.AreaAppState
+}
+
 // statusFor is statusOf with one exception: critical data that could not
 // be read is unverified, so it must block SAFE TO WIPE (spec 8.5 rule 2).
 func statusFor(o Outcome, area string) module.Status {
-	if o == NotChecked && area == manifest.AreaCritical {
+	if o == NotChecked && isCritical(area) {
 		return module.StatusWarn
 	}
 	return statusOf(o)

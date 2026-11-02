@@ -19,8 +19,9 @@ const (
 )
 
 var (
-	ErrNewerSchema = errors.New("the record was written by a newer mtm; upgrade mtm on this Mac")
-	ErrNoModule    = errors.New("module not in manifest")
+	ErrNewerSchema     = errors.New("the record was written by a newer mtm; upgrade mtm on this Mac")
+	ErrInvalidManifest = errors.New("the record in ~/.mtm is incomplete or damaged")
+	ErrNoModule        = errors.New("module not in manifest")
 )
 
 type Manifest struct {
@@ -55,6 +56,11 @@ func Load(st *stage.Stage) (*Manifest, error) {
 	}
 	if m.Schema > Schema {
 		return nil, fmt.Errorf("%w (record schema %d, this mtm reads up to %d)", ErrNewerSchema, m.Schema, Schema)
+	}
+	// Without a machine id, verify can't tell this Mac from the one that
+	// ran prepare, and prepare can't tell whose record it would overwrite.
+	if m.Schema < 1 || m.MachineID == "" {
+		return nil, fmt.Errorf("%w: %s has no schema version or machine id", ErrInvalidManifest, path)
 	}
 	if m.Modules == nil {
 		m.Modules = map[string]ModuleRecord{}

@@ -47,6 +47,9 @@ func TestClassify(t *testing.T) {
 		{"symlink target changed", link, Observed{Exists: true, Type: manifest.TypeLink, Target: "Elsewhere", MTime: 900}, notVolatile, Corrupt},
 		{"file became a folder", file, Observed{Exists: true, Type: manifest.TypeDir, MTime: 900}, notVolatile, Corrupt},
 		{"folder with new entries", dir, Observed{Exists: true, Type: manifest.TypeDir, MTime: 1_500}, notVolatile, Match},
+		{"missing, unknown area", manifest.Entry{Path: "x", Type: manifest.TypeFile, Area: "future"}, Observed{}, notVolatile, MissingCritical},
+		{"unknown type", manifest.Entry{Path: "x", Type: "future", Area: manifest.AreaCritical}, same, notVolatile, Corrupt},
+		{"unknown type, missing", manifest.Entry{Path: "x", Type: "future", Area: manifest.AreaAppState}, Observed{}, notVolatile, Corrupt},
 	}
 	for _, tt := range tests {
 		t.Run(tt.name, func(t *testing.T) {
@@ -88,5 +91,16 @@ func TestStatusForUnreadableDependsOnArea(t *testing.T) {
 				t.Errorf("statusFor(%v, %s) = %q, want %q", o, a, got, want)
 			}
 		}
+	}
+}
+
+func TestUnknownAreaCountsAsCritical(t *testing.T) {
+	if got := statusFor(NotChecked, "future"); got != module.StatusWarn {
+		t.Errorf("not checked in an unknown area = %q, want warn", got)
+	}
+	tl := newTally()
+	tl.add(manifest.Entry{Path: "Library/Future/x", Type: manifest.TypeFile, Area: "future"}, MissingCritical)
+	if c := tl.checks()[0]; !c.Critical || c.Status != module.StatusFail {
+		t.Errorf("check = %+v, want a critical fail", c)
 	}
 }

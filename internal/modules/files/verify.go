@@ -58,8 +58,10 @@ func (Module) Verify(env module.Env, st *stage.Stage) ([]module.Check, error) {
 	return t.checks(), nil
 }
 
+// observe looks at a recorded path on the new Mac. Only files, folders, and
+// links are looked at; every other entry is judged from the record alone.
 func observe(home string, rec manifest.Entry, preparedAt int64) (Observed, error) {
-	if rec.Type == manifest.TypeCloud || rec.Type == manifest.TypeUnreadable {
+	if rec.Type != manifest.TypeFile && rec.Type != manifest.TypeDir && rec.Type != manifest.TypeLink {
 		return Observed{}, nil
 	}
 	abs := filepath.Join(home, filepath.FromSlash(rec.Path))
@@ -124,7 +126,7 @@ func (t *tally) add(rec manifest.Entry, o Outcome) {
 		t.groups[name] = g
 		t.order = append(t.order, name)
 	}
-	g.critical = g.critical || rec.Area == manifest.AreaCritical
+	g.critical = g.critical || isCritical(rec.Area)
 	g.counts[o]++
 	s := statusFor(o, rec.Area)
 	g.raise(s)
