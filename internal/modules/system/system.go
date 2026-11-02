@@ -61,7 +61,8 @@ type Inventory struct {
 
 type snapshot struct {
 	Inventory
-	etcData map[string][]byte
+	etcData       map[string][]byte
+	etcUnreadable []string
 }
 
 func (m Module) snapshot(env module.Env) (snapshot, error) {
@@ -73,7 +74,7 @@ func (m Module) snapshot(env module.Env) (snapshot, error) {
 	if err != nil {
 		return snapshot{}, err
 	}
-	etc, data, err := m.readEtc()
+	etc, data, unreadable, err := m.readEtc()
 	if err != nil {
 		return snapshot{}, err
 	}
@@ -81,12 +82,15 @@ func (m Module) snapshot(env module.Env) (snapshot, error) {
 	if err != nil {
 		return snapshot{}, err
 	}
-	return snapshot{Inventory: Inventory{Shell: shell, ShellListed: listed, Etc: etc, Apps: list}, etcData: data}, nil
+	return snapshot{Inventory: Inventory{Shell: shell, ShellListed: listed, Etc: etc, Apps: list}, etcData: data, etcUnreadable: unreadable}, nil
 }
 
+// shellListed reads an unreadable /etc/shells as not listing the shell:
+// readEtc reports that file, and the cost is a warning or a duplicate line
+// in /etc/shells.
 func (m Module) shellListed(shell string) (bool, error) {
 	data, err := os.ReadFile(filepath.Join(m.EtcDir, "shells"))
-	if errors.Is(err, fs.ErrNotExist) {
+	if errors.Is(err, fs.ErrNotExist) || errors.Is(err, fs.ErrPermission) {
 		return false, nil
 	}
 	if err != nil {
@@ -100,29 +104,36 @@ func (m Module) shellListed(shell string) (bool, error) {
 	return false, nil
 }
 
-func (m Module) readEtc() (map[string]string, map[string][]byte, error) {
+// readEtc fingerprints and reads the /etc files mtm restores. A file the
+// user can't read is listed in unreadable instead of failing the module:
+// the other files still need recording, and a recorded file that can't be
+// read later has no fingerprint, so it counts as differing.
+func (m Module) readEtc() (hashes map[string]string, data map[string][]byte, unreadable []string, err error) {
 	rels := slices.Clone(etcFiles)
 	entries, err := os.ReadDir(filepath.Join(m.EtcDir, "paths.d"))
 	if err != nil && !errors.Is(err, fs.ErrNotExist) {
-		return nil, nil, fmt.Errorf("read /etc/paths.d: %w", err)
+		return nil, nil, nil, fmt.Errorf("read /etc/paths.d: %w", err)
 	}
 	for _, e := range entries {
 		if e.Type().IsRegular() {
 			rels = append(rels, "paths.d/"+e.Name())
 		}
 	}
-	hashes, data := map[string]string{}, map[string][]byte{}
+	hashes, data = map[string]string{}, map[string][]byte{}
 	for _, rel := range rels {
 		b, err := os.ReadFile(filepath.Join(m.EtcDir, filepath.FromSlash(rel)))
-		if errors.Is(err, fs.ErrNotExist) {
+		switch {
+		case errors.Is(err, fs.ErrNotExist):
 			continue
-		}
-		if err != nil {
-			return nil, nil, fmt.Errorf("read /etc/%s: %w", rel, err)
+		case errors.Is(err, fs.ErrPermission):
+			unreadable = append(unreadable, rel)
+			continue
+		case err != nil:
+			return nil, nil, nil, fmt.Errorf("read /etc/%s: %w", rel, err)
 		}
 		hashes[rel], data[rel] = fsinfo.HashBytes(b), b
 	}
-	return hashes, data, nil
+	return hashes, data, unreadable, nil
 }
 
 func (m Module) Scan(env module.Env) ([]module.Finding, error) {
@@ -162,6 +173,10 @@ func (m Module) Prepare(env module.Env, st *stage.Stage) (module.Result, error) 
 		Done: []string{fmt.Sprintf("recorded login shell %s, %s, and %s", snap.Shell,
 			words.Count(len(snap.Etc), "/etc file", "/etc files"), words.Count(len(snap.Apps), "app", "apps"))},
 	}
+	for _, rel := range snap.etcUnreadable {
+		res.Problems = append(res.Problems, byHand("etc-unreadable:"+rel, "Couldn't read /etc/"+rel+"; it won't be restored",
+			"Copy it to the new Mac by hand, or make it readable and run mtm prepare again."))
+	}
 	if f, ok := intelOnly(snap.Apps); ok {
 		res.Problems = append(res.Problems, f)
 	}
@@ -183,7 +198,7 @@ func (m Module) Finish(env module.Env, st *stage.Stage) (module.Result, error) {
 			continue
 		}
 		res.Problems = append(res.Problems, byHand("etc:"+rel, "/etc/"+rel+" differs from the old Mac",
-			"Review the old copy, then restore it with: sudo cp "+macos.ShellQuote(st.Path(etcExport, filepath.FromSlash(rel)))+" "+macos.ShellQuote("/etc/"+rel)))
+			"Review the old copy, then restore it with: "+restoreEtc(st.Path(etcExport, filepath.FromSlash(rel)), "/etc/"+rel)))
 	}
 	if hasIntelOnly(old.Apps) && !m.rosettaInstalled() {
 		res.Problems = append(res.Problems, byHand("rosetta", "Intel-only apps need Rosetta", "Run: sudo softwareupdate --install-rosetta --agree-to-license"))
@@ -193,9 +208,12 @@ func (m Module) Finish(env module.Env, st *stage.Stage) (module.Result, error) {
 		if err != nil {
 			return module.Result{}, err
 		}
-		fix := "Run: chsh -s " + macos.ShellQuote(old.Shell)
+		q := macos.ShellQuote(old.Shell)
+		fix := "Run: chsh -s " + q
 		if !listed {
-			fix = "Run: echo " + macos.ShellQuote(old.Shell) + " | sudo tee -a /etc/shells, then: chsh -s " + macos.ShellQuote(old.Shell)
+			// One line, so pasting it whole can't run tee with stray
+			// arguments that append to other files as root.
+			fix = "Run: echo " + q + " | sudo tee -a /etc/shells >/dev/null && chsh -s " + q
 		}
 		res.Problems = append(res.Problems, byHand("shell", "Your login shell is "+now.Shell+", not "+old.Shell, fix))
 	}
@@ -203,6 +221,13 @@ func (m Module) Finish(env module.Env, st *stage.Stage) (module.Result, error) {
 		res.Done = []string{"login shell, /etc files, and Rosetta are as they were"}
 	}
 	return res, nil
+}
+
+// restoreEtc copies an exported /etc file back as root-owned and readable
+// by all: the export is mtm's private 0600 copy, and cp would keep that
+// mode, leaving a file such as /etc/hosts unreadable to everyone else.
+func restoreEtc(src, dst string) string {
+	return "sudo install -m 0644 -o root -g wheel " + macos.ShellQuote(src) + " " + macos.ShellQuote(dst)
 }
 
 func intelOnly(list []apps.App) (module.Finding, bool) {

@@ -11,6 +11,7 @@ import (
 	"time"
 
 	"github.com/momentmaker/mtm/internal/apps"
+	"github.com/momentmaker/mtm/internal/macos"
 	"github.com/momentmaker/mtm/internal/manifest"
 	"github.com/momentmaker/mtm/internal/module"
 	"github.com/momentmaker/mtm/internal/runner"
@@ -191,7 +192,7 @@ func TestFinishPrintsRestoreCommands(t *testing.T) {
 	for _, p := range res.Problems {
 		fixes[p.ID] = p.Fix
 	}
-	if want := "sudo cp '" + st.Path("exports", "etc", "hosts") + "' '/etc/hosts'"; !strings.Contains(fixes["etc:hosts"], want) {
+	if want := "sudo install -m 0644 -o root -g wheel '" + st.Path("exports", "etc", "hosts") + "' '/etc/hosts'"; !strings.Contains(fixes["etc:hosts"], want) {
 		t.Errorf("hosts fix = %q, want it to contain %q", fixes["etc:hosts"], want)
 	}
 	if !strings.Contains(fixes["rosetta"], "softwareupdate --install-rosetta") {
@@ -245,5 +246,77 @@ func TestFinishQuotesEtcDestination(t *testing.T) {
 	}
 	if want := `'/etc/paths.d/my tool'\''s'`; !strings.Contains(fix, want) {
 		t.Errorf("fix = %q, want it to contain %q", fix, want)
+	}
+}
+
+func fixesByID(res module.Result) map[string]string {
+	fixes := map[string]string{}
+	for _, p := range res.Problems {
+		fixes[p.ID] = p.Fix
+	}
+	return fixes
+}
+
+func TestFinishAddsAnUnlistedShellAndSwitchesInOnePasteableLine(t *testing.T) {
+	f := newFixture(t)
+	m, st, _ := f.prepare(t)
+	testutil.WriteFile(t, filepath.Join(f.etc, "shells"), "# shells\n/bin/zsh\n")
+	f.setShell("/bin/zsh")
+	res, err := f.module().Finish(f.env(m), st)
+	if err != nil {
+		t.Fatal(err)
+	}
+	q := macos.ShellQuote(f.shell)
+	if got, want := fixesByID(res)["shell"], "Run: echo "+q+" | sudo tee -a /etc/shells >/dev/null && chsh -s "+q; got != want {
+		t.Errorf("shell fix = %q, want %q", got, want)
+	}
+}
+
+func makeUnreadable(t *testing.T, path string) {
+	t.Helper()
+	if os.Geteuid() == 0 {
+		t.Skip("root reads files whatever their mode")
+	}
+	if err := os.Chmod(path, 0); err != nil {
+		t.Fatal(err)
+	}
+}
+
+func TestPrepareSkipsAnUnreadableEtcFileAndWarns(t *testing.T) {
+	for _, rel := range []string{"hosts", "shells"} {
+		t.Run(rel, func(t *testing.T) {
+			f := newFixture(t)
+			makeUnreadable(t, filepath.Join(f.etc, rel))
+			_, st, res := f.prepare(t)
+			inv := res.Inventory.(Inventory)
+			if _, ok := inv.Etc[rel]; ok || len(inv.Etc) != 2 {
+				t.Errorf("etc files = %q, want the two readable ones", slices.Sorted(maps.Keys(inv.Etc)))
+			}
+			if _, err := os.Stat(st.Path("exports", "etc", rel)); !os.IsNotExist(err) {
+				t.Errorf("copied an unreadable file: %v", err)
+			}
+			want := "Couldn't read /etc/" + rel + "; it won't be restored"
+			if !slices.ContainsFunc(res.Problems, func(p module.Finding) bool {
+				return p.Severity == module.SeverityWarn && p.Title == want
+			}) {
+				t.Errorf("problems = %+v, want a warning %q", res.Problems, want)
+			}
+		})
+	}
+}
+
+func TestVerifyAndFinishTreatAnUnreadableRecordedEtcFileAsDiffering(t *testing.T) {
+	f := newFixture(t)
+	m, st, _ := f.prepare(t)
+	makeUnreadable(t, filepath.Join(f.etc, "hosts"))
+	if c := f.verify(t, m, st)["system:etc"]; c.Status != module.StatusWarn || !slices.Equal(c.Paths, []string{"/etc/hosts"}) {
+		t.Errorf("system:etc = %s %q (%s), want a warning naming /etc/hosts", c.Status, c.Paths, c.Detail)
+	}
+	res, err := f.module().Finish(f.env(m), st)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := "sudo install -m 0644 -o root -g wheel " + macos.ShellQuote(st.Path("exports", "etc", "hosts")) + " '/etc/hosts'"; !strings.Contains(fixesByID(res)["etc:hosts"], want) {
+		t.Errorf("hosts fix = %q, want it to contain %q", fixesByID(res)["etc:hosts"], want)
 	}
 }
