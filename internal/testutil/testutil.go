@@ -7,6 +7,8 @@ import (
 	"path/filepath"
 	"strings"
 	"testing"
+
+	"github.com/momentmaker/mtm/internal/runner"
 )
 
 // WriteFile creates path with content, making parent folders as needed.
@@ -49,4 +51,16 @@ func Git(t *testing.T, dir string, args ...string) string {
 		t.Fatalf("git %s: %v\n%s", strings.Join(args, " "), err, out)
 	}
 	return strings.TrimSpace(string(out))
+}
+
+// MacResponses are fake answers from a supported Mac (Apple Silicon,
+// macOS 26.7.1, FileVault on) whose hardware UUID is uuid.
+func MacResponses(uuid string) map[string]runner.Response {
+	return map[string]runner.Response{
+		"/usr/sbin/sysctl -n hw.optional.arm64":          {Stdout: "1\n"},
+		"/usr/bin/sw_vers -productVersion":               {Stdout: "26.7.1\n"},
+		"/usr/bin/sw_vers -buildVersion":                 {Stdout: "25G241\n"},
+		"/usr/bin/fdesetup status":                       {Stdout: "FileVault is On.\n"},
+		"/usr/sbin/ioreg -rd1 -c IOPlatformExpertDevice": {Stdout: `    "IOPlatformUUID" = "` + uuid + `"` + "\n"},
+	}
 }
