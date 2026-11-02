@@ -9,6 +9,30 @@ Spec: `docs/superpowers/specs/2026-11-02-mtm-design.md`. Each stage gets its own
 **Plan**: `docs/superpowers/plans/2026-11-02-mtm-stage1-core-files-git.md`
 **Status**: Complete
 
+### Known gaps carried out of Stage 1
+Found in the final review and deliberately deferred. None of them can produce a false SAFE TO WIPE unless marked otherwise. Fix the first two before the author's real migration.
+
+**False NOT SAFE**
+- **git activity on the new Mac blocks the verdict.** The files check also covers `.git` internals and tracked working-tree files, so `git gc` or a branch switch on the new Mac reads as missing critical files. This needs a ruling on the spec's 8.4 vs 9.2 conflict and a redesign: the files check hands `.git` to the git module; git verify checks that local-only objects are reachable (`rev-list --objects --missing=print <recorded tips> --not --remotes`); a tracked-clean file that goes missing becomes info. Until then, run `mtm verify` right after Migration Assistant, before working in any repo.
+- **Links whose targets are legitimately absent read as corrupted.** Examples: Bazel output links into `/private/var/tmp`, Nix links into `/nix`, an external drive that isn't attached. Fix: give these their own "link target missing → <target>" outcome with a remedy, and exempt regenerable roots, while a link into an internal volume still fails.
+
+**Needs confirming on a real Mac**
+- In repos under iCloud Desktop & Documents or File Provider folders, `git status` may download cloud-only files after migration, because every index entry looks changed. Confirm, then skip and warn for those repos.
+
+**Can produce a stale record**
+- A `prepare` re-run that stops before saving (a preflight blocker, a Time Machine exclusion failure, a read error) keeps the previous record. Prepare does say NOT READY. Stage 4's `retire` covers this class: changes made after the last successful prepare.
+
+**Smaller items**
+- `--details` is capped at 200 paths per folder. Spec 8.4/§10 needs every path; lift the cap before release.
+- File modes are recorded but never compared.
+- One unreadable untracked file drops its whole repo from the git record.
+- git search depth isn't configurable (spec 9.2).
+- Case-only name collisions between a case-sensitive old volume and a case-insensitive new one aren't handled.
+- Modified tracked files aren't fingerprinted (the files check covers them by size and timestamp).
+- Following links at prepare and verify can hang on a stale network mount.
+- Output escaping uses `strconv.IsPrint`, so ideographic and no-break spaces print escaped. Switch to `unicode.IsGraphic`. Bidi controls reach `--json` output raw. CLI errors on stderr aren't escaped.
+- A damaged `~/.mtm` record exits 2 without suggesting `mtm cleanup --force`.
+
 ## Stage 2: Machine state and `finish`
 **Goal**: the `system` module (app inventory, Intel-only apps and Rosetta, login shell, `/etc` files), `homebrew` (Brewfile, stopping and restarting services, root services printed), `toolchains` (versions resolved through the login shell), and `loginitems`. Adds the `mtm finish` command and `prepare --undo`, and switches the post-prepare instructions to `mtm finish`.
 **Success Criteria**: on the author's M3, `scan` lists every toolchain and brew service correctly. `prepare` stops and `--undo` restarts brew services. `verify` reports matching versions on a copy.
