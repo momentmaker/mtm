@@ -58,9 +58,30 @@ func TestExcludedAndVolatile(t *testing.T) {
 	if excluded.Match("Library/Preferences/com.apple.dock.plist") {
 		t.Error("preferences excluded")
 	}
-	for _, rel := range []string{"GitHub/.DS_Store", ".zcompdump-host-5.9", "Library/Saved Application State/x/data.data"} {
+	for _, rel := range []string{
+		"GitHub/.DS_Store",
+		".zcompdump-host-5.9",
+		"Library/Saved Application State/x/data.data",
+		".zsh_sessions/A1B2.session",
+		".bash_sessions/A1B2.history",
+		".npm/_logs/2026-11-01T10_00_00_000Z-debug-0.log",
+		".npm/_cacache/content-v2/sha512/ab/cd",
+		".cache/pip/http/x",
+		".vscode/extensions/ms-python.python-2026.1.0/package.json",
+		".cursor/extensions/x-1.0.0/package.json",
+		".cargo/registry/cache/index.crates.io/serde-1.0.0.crate",
+		"go/pkg/mod/cache/download/x/@v/v1.0.0.zip",
+		".gradle/caches/modules-2/files-2.1/x.jar",
+		".m2/repository/org/x/1.0/x-1.0.jar",
+		".bun/install/cache/x@1.0.0/package.json",
+	} {
 		if !volatile.Match(rel) {
 			t.Errorf("volatile.Match(%q) = false, want true", rel)
+		}
+	}
+	for _, rel := range []string{".npm/npmrc", ".vscode/settings.json", ".cargo/config.toml", "go/pkg/mod/github.com/x/y@v1/y.go", ".gradle/gradle.properties", ".m2/settings.xml", "GitHub/app/.cache/x"} {
+		if volatile.Match(rel) {
+			t.Errorf("volatile.Match(%q) = true, want false", rel)
 		}
 	}
 }

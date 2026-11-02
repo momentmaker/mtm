@@ -20,10 +20,25 @@ var excluded = pathset.MustNew(
 )
 
 // volatile paths come and go on their own, so a missing one is not an error.
+// Outside ~/Library these are shell session history and tool caches that
+// their tools prune or download again, such as old editor extension
+// versions and package caches.
 var volatile = pathset.MustNew(
 	".DS_Store",
 	".zcompdump*",
 	"Library/Saved Application State/",
+	".zsh_sessions/",
+	".bash_sessions/",
+	".npm/_logs/",
+	".npm/_cacache/",
+	".cache/",
+	".vscode/extensions/",
+	".cursor/extensions/",
+	".cargo/registry/",
+	"go/pkg/mod/cache/",
+	".gradle/caches/",
+	".m2/repository/",
+	".bun/install/cache/",
 )
 
 var fingerprinted = pathset.MustNew(".ssh/", ".gnupg/", ".config/")
