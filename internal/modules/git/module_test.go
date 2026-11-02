@@ -2,11 +2,13 @@ package git
 
 import (
 	"context"
+	"io/fs"
 	"maps"
 	"os"
 	"path/filepath"
 	"slices"
 	"strings"
+	"syscall"
 	"testing"
 	"time"
 
@@ -106,6 +108,40 @@ func TestDiscoverFindsReposAndSkipsNoise(t *testing.T) {
 	}
 	if want := []string{"GitHub/app", "deep/1/2/3/4/5"}; !slices.Equal(got, want) {
 		t.Errorf("discover = %q, want %q", got, want)
+	}
+}
+
+func TestDiscoverSkipsFoldersItCannotRead(t *testing.T) {
+	home := t.TempDir()
+	for _, dir := range []string{"GitHub/app/.git", "broken/inner/.git"} {
+		if err := os.MkdirAll(filepath.Join(home, dir), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	broken := filepath.Join(home, "broken")
+	f := &finder{ctx: context.Background(), home: home, maxDepth: 6, readDir: func(dir string) ([]fs.DirEntry, error) {
+		if dir == broken {
+			return nil, &fs.PathError{Op: "open", Path: dir, Err: syscall.EIO}
+		}
+		return os.ReadDir(dir)
+	}}
+	got, err := f.find()
+	if err != nil {
+		t.Fatalf("find: %v, want the broken folder skipped", err)
+	}
+	if want := []string{"GitHub/app"}; !slices.Equal(got, want) {
+		t.Errorf("find = %q, want %q", got, want)
+	}
+}
+
+func TestDiscoverFailsWhenHomeUnreadable(t *testing.T) {
+	home := t.TempDir()
+	if err := os.Chmod(home, 0); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.Chmod(home, 0o755) })
+	if repos, err := discover(context.Background(), home, 6); err == nil {
+		t.Errorf("discover = %q, nil; want an error for an unreadable home folder", repos)
 	}
 }
 
