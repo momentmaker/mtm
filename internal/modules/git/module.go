@@ -8,6 +8,7 @@ import (
 
 	"github.com/momentmaker/mtm/internal/module"
 	"github.com/momentmaker/mtm/internal/stage"
+	"github.com/momentmaker/mtm/internal/words"
 )
 
 const (
@@ -37,7 +38,7 @@ func (m Module) Scan(env module.Env) ([]module.Finding, error) {
 		ID:       "repos",
 		Severity: module.SeverityInfo,
 		Handler:  module.ByMigrationAssistant,
-		Title:    plural(len(repos), "git repository", "git repositories") + " found",
+		Title:    words.Count(len(repos), "git repository", "git repositories") + " found",
 		Detail:   "Migration Assistant copies them. mtm checks that every recorded commit and untracked file arrived.",
 	}}
 	for _, rel := range repos {
@@ -99,7 +100,7 @@ func (m Module) Prepare(env module.Env, _ *stage.Stage) (module.Result, error) {
 		inv.Repos = append(inv.Repos, r)
 	}
 	res.Inventory = inv
-	res.Done = []string{"recorded " + plural(len(inv.Repos), "repository", "repositories")}
+	res.Done = []string{"recorded " + words.Count(len(inv.Repos), "repository", "repositories")}
 	return res, nil
 }
 

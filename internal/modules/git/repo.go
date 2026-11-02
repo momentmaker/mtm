@@ -14,6 +14,7 @@ import (
 	"github.com/momentmaker/mtm/internal/fsinfo"
 	"github.com/momentmaker/mtm/internal/module"
 	"github.com/momentmaker/mtm/internal/runner"
+	"github.com/momentmaker/mtm/internal/words"
 )
 
 // Repo is what prepare records about one repository. Fingerprints maps
@@ -199,19 +200,19 @@ func (r Repo) commits() []string {
 func (r Repo) risks() []string {
 	var out []string
 	if r.Unpushed > 0 {
-		out = append(out, plural(r.Unpushed, "commit", "commits")+" not on any remote")
+		out = append(out, words.Count(r.Unpushed, "commit", "commits")+" not on any remote")
 	}
 	if n := len(r.Stash); n > 0 {
-		out = append(out, plural(n, "stash", "stashes"))
+		out = append(out, words.Count(n, "stash", "stashes"))
 	}
 	if n := r.changedTracked(); n > 0 {
-		out = append(out, plural(n, "file with uncommitted changes", "files with uncommitted changes"))
+		out = append(out, words.Count(n, "file with uncommitted changes", "files with uncommitted changes"))
 	}
 	if n := len(r.Untracked); n > 0 {
-		out = append(out, plural(n, "untracked file", "untracked files"))
+		out = append(out, words.Count(n, "untracked file", "untracked files"))
 	}
 	if n := len(r.Important); n > 0 {
-		out = append(out, plural(n, "ignored file that looks like a secret or local config", "ignored files that look like secrets or local config"))
+		out = append(out, words.Count(n, "ignored file that looks like a secret or local config", "ignored files that look like secrets or local config"))
 	}
 	return out
 }

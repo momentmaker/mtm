@@ -51,3 +51,9 @@ func HashFile(path string) (string, error) {
 	}
 	return "sha256:" + hex.EncodeToString(h.Sum(nil)), nil
 }
+
+// HashBytes fingerprints content already in memory, in HashFile's format.
+func HashBytes(data []byte) string {
+	sum := sha256.Sum256(data)
+	return "sha256:" + hex.EncodeToString(sum[:])
+}

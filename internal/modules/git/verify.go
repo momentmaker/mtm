@@ -12,6 +12,7 @@ import (
 	"github.com/momentmaker/mtm/internal/fsinfo"
 	"github.com/momentmaker/mtm/internal/module"
 	"github.com/momentmaker/mtm/internal/stage"
+	"github.com/momentmaker/mtm/internal/words"
 )
 
 func (Module) Verify(env module.Env, _ *stage.Stage) ([]module.Check, error) {
@@ -53,7 +54,7 @@ func verifyRepo(env module.Env, old Repo, preparedAt int64) module.Check {
 	case err != nil:
 		problems = append(problems, "could not check recorded commits: "+err.Error())
 	case len(missing) > 0:
-		problems = append(problems, plural(len(missing), "recorded commit is", "recorded commits are")+" missing")
+		problems = append(problems, words.Count(len(missing), "recorded commit is", "recorded commits are")+" missing")
 	}
 	p, n := compareFingerprints(abs, old.Fingerprints, preparedAt)
 	problems = append(problems, p...)

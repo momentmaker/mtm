@@ -61,3 +61,17 @@ func TestHashFile(t *testing.T) {
 		t.Errorf("HashFile = %q, want %q", got, want)
 	}
 }
+
+func TestHashBytesMatchesHashFile(t *testing.T) {
+	path := filepath.Join(t.TempDir(), "f")
+	if err := os.WriteFile(path, []byte("127.0.0.1 localhost\n"), 0o600); err != nil {
+		t.Fatal(err)
+	}
+	want, err := HashFile(path)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := HashBytes([]byte("127.0.0.1 localhost\n")); got != want {
+		t.Errorf("HashBytes = %q, want %q", got, want)
+	}
+}

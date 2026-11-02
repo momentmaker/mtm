@@ -95,10 +95,3 @@ func importantIgnored(ignored []string) []string {
 	}
 	return out
 }
-
-func plural(n int, one, many string) string {
-	if n == 1 {
-		return "1 " + one
-	}
-	return fmt.Sprintf("%d %s", n, many)
-}

@@ -65,12 +65,3 @@ func TestImportantIgnored(t *testing.T) {
 		t.Errorf("importantIgnored = %q, want %q", got, want)
 	}
 }
-
-func TestPlural(t *testing.T) {
-	if got := plural(1, "stash", "stashes"); got != "1 stash" {
-		t.Errorf("plural(1) = %q", got)
-	}
-	if got := plural(3, "stash", "stashes"); got != "3 stashes" {
-		t.Errorf("plural(3) = %q", got)
-	}
-}
