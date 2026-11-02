@@ -1,0 +1,76 @@
+package files
+
+import (
+	"github.com/momentmaker/mtm/internal/manifest"
+	"github.com/momentmaker/mtm/internal/module"
+)
+
+type Outcome int
+
+const (
+	Match Outcome = iota
+	ChangedAfterPrepare
+	Corrupt
+	MissingVolatile
+	MissingCritical
+	MissingAppState
+	CloudOnly
+	NotChecked
+)
+
+// Observed is what verify finds at a recorded path on the new Mac. Hash is
+// filled only when the record has a fingerprint and the file was not
+// modified after prepare.
+type Observed struct {
+	Exists     bool
+	Unreadable bool
+	Dataless   bool
+	Type       string
+	Size       int64
+	MTime      int64
+	Target     string
+	Hash       string
+}
+
+// Classify applies spec section 8.4 to one recorded entry. A file modified
+// after prepare is a normal change, not damage. Folders are checked for
+// presence only, because their times change whenever an entry is added.
+func Classify(rec manifest.Entry, obs Observed, preparedAt int64, isVolatile func(string) bool) Outcome {
+	switch {
+	case rec.Type == manifest.TypeCloud:
+		return CloudOnly
+	case rec.Type == manifest.TypeUnreadable:
+		return NotChecked
+	case !obs.Exists && isVolatile(rec.Path):
+		return MissingVolatile
+	case !obs.Exists && rec.Area == manifest.AreaCritical:
+		return MissingCritical
+	case !obs.Exists:
+		return MissingAppState
+	case obs.Unreadable:
+		return NotChecked
+	case obs.Dataless:
+		return CloudOnly
+	case rec.Type != manifest.TypeDir && obs.MTime > preparedAt:
+		return ChangedAfterPrepare
+	case obs.Type != rec.Type:
+		return Corrupt
+	case rec.Type == manifest.TypeFile && (obs.Size != rec.Size || (rec.Hash != "" && obs.Hash != rec.Hash)):
+		return Corrupt
+	case rec.Type == manifest.TypeLink && obs.Target != rec.Target:
+		return Corrupt
+	}
+	return Match
+}
+
+func statusOf(o Outcome) module.Status {
+	switch o {
+	case Match:
+		return module.StatusPass
+	case MissingAppState:
+		return module.StatusWarn
+	case MissingCritical, Corrupt:
+		return module.StatusFail
+	}
+	return module.StatusInfo
+}
