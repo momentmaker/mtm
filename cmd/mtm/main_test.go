@@ -4,12 +4,17 @@ import (
 	"bytes"
 	"context"
 	"encoding/json"
+	"path/filepath"
 	"strings"
 	"testing"
 	"time"
 
 	"github.com/momentmaker/mtm/internal/app"
+	"github.com/momentmaker/mtm/internal/module"
+	"github.com/momentmaker/mtm/internal/modules/files"
+	"github.com/momentmaker/mtm/internal/modules/git"
 	"github.com/momentmaker/mtm/internal/runner"
+	"github.com/momentmaker/mtm/internal/stage"
 	"github.com/momentmaker/mtm/internal/testutil"
 )
 
@@ -100,5 +105,59 @@ func TestCleanupWithNothingToClean(t *testing.T) {
 	code := run(ctx, []string{"cleanup"}, &out, &errOut, fileVaultOffApp)
 	if code != exitOK || !strings.Contains(out.String(), "Nothing to clean up") {
 		t.Errorf("code %d out %q", code, out.String())
+	}
+}
+
+// macApp builds the real app for a Mac whose hardware UUID is uuid. System
+// tools are faked; git runs for real.
+func macApp(uuid string) func(string) *app.App {
+	return func(home string) *app.App {
+		responses := testutil.MacResponses(uuid)
+		responses["/usr/bin/tmutil addexclusion "+filepath.Join(home, stage.DirName)] = runner.Response{}
+		return &app.App{
+			Runner:  &runner.Fake{Responses: responses, Fallback: runner.Exec{}},
+			Home:    home,
+			Version: "test",
+			Now:     time.Now,
+			Modules: []module.Module{files.New(), git.New()},
+		}
+	}
+}
+
+// preparedHome seeds a temporary HOME with a dotfile, a document, and a
+// repo, and runs mtm prepare there as the Mac with uuid.
+func preparedHome(t *testing.T, uuid string) {
+	t.Helper()
+	testutil.IsolateGit(t)
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	testutil.WriteFile(t, filepath.Join(home, ".zshrc"), "export A=1\n")
+	testutil.WriteFile(t, filepath.Join(home, "Documents/notes.md"), "notes\n")
+	repo := filepath.Join(home, "GitHub", "app")
+	testutil.WriteFile(t, filepath.Join(repo, "main.go"), "package main\n")
+	testutil.Git(t, repo, "init", "-q", "-b", "main")
+	testutil.Git(t, repo, "add", ".")
+	testutil.Git(t, repo, "commit", "-q", "-m", "first")
+	var out, errOut bytes.Buffer
+	if code := run(ctx, []string{"prepare"}, &out, &errOut, macApp(uuid)); code != exitOK {
+		t.Fatalf("prepare exit %d\n%s%s", code, out.String(), errOut.String())
+	}
+}
+
+func TestVerifyOnNewMacExitsZeroWhenSafe(t *testing.T) {
+	preparedHome(t, "OLD-MAC")
+	var out, errOut bytes.Buffer
+	code := run(ctx, []string{"verify"}, &out, &errOut, macApp("NEW-MAC"))
+	if code != exitOK || !strings.Contains(out.String(), "SAFE TO WIPE") || strings.Contains(out.String(), "NOT SAFE") {
+		t.Errorf("exit %d, want %d and SAFE TO WIPE:\n%s%s", code, exitOK, out.String(), errOut.String())
+	}
+}
+
+func TestVerifyOnSameMacExitsOneWhenNotSafe(t *testing.T) {
+	preparedHome(t, "OLD-MAC")
+	var out, errOut bytes.Buffer
+	code := run(ctx, []string{"verify"}, &out, &errOut, macApp("OLD-MAC"))
+	if code != exitProblems || !strings.Contains(out.String(), "NOT SAFE TO WIPE") {
+		t.Errorf("exit %d, want %d and NOT SAFE TO WIPE:\n%s%s", code, exitProblems, out.String(), errOut.String())
 	}
 }
