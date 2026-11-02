@@ -190,9 +190,9 @@ func (a *App) Verify(ctx context.Context, opts VerifyOptions) (VerifyReport, err
 	for _, mod := range mods {
 		if _, ok := m.Modules[mod.Name()]; !ok {
 			checks = append(checks, module.Check{
-				Module: mod.Name(), ID: mod.Name() + ":not-prepared", Status: module.StatusWarn,
+				Module: mod.Name(), ID: mod.Name() + ":not-prepared", Status: module.StatusFail, Critical: true,
 				Title:  mod.Name() + " was not recorded by prepare",
-				Detail: "run mtm prepare on the old Mac to include it",
+				Detail: "run mtm prepare on the old Mac to record it, then run mtm verify again",
 			})
 			continue
 		}

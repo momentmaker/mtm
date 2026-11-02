@@ -302,3 +302,15 @@ func TestCleanupForce(t *testing.T) {
 		t.Errorf("forced cleanup = %v, %v", removed, err)
 	}
 }
+
+func TestVerifyBlocksOnModuleThatPrepareNeverRecorded(t *testing.T) {
+	old := seedHome(t)
+	rep, err := newTestApp(old, fakeMac(old, oldUUID)).Prepare(ctx, PrepareOptions{Only: []string{"files"}})
+	if err != nil || !rep.Ready {
+		t.Fatalf("prepare --only files: %+v, %v", rep, err)
+	}
+	got := verifyOn(t, migrate(t, old), newUUID, VerifyOptions{})
+	if got.Verdict.Safe || !slices.Contains(blockingIDs(got), "git:not-prepared") {
+		t.Errorf("safe = %v, blocking = %v; want git:not-prepared blocking", got.Verdict.Safe, blockingIDs(got))
+	}
+}
