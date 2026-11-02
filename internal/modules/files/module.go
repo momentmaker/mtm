@@ -44,7 +44,7 @@ func (Module) Prepare(env module.Env, st *stage.Stage) (module.Result, error) {
 		done = append(done, fmt.Sprintf("left %d cloud-only items untouched", stats.Cloud))
 	}
 	if n := countAppState(stats.Unreadable); n > 0 {
-		done = append(done, fmt.Sprintf("could not read %s in ~/Library; they will not be checked", plural(n, "folder", "folders")))
+		done = append(done, fmt.Sprintf("could not read %s in ~/Library (app state, not checked)", plural(n, "folder", "folders")))
 	}
 	return module.Result{Inventory: stats, Done: done, Problems: prepareProblems(stats)}, nil
 }

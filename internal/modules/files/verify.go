@@ -210,7 +210,7 @@ var outcomeLabels = []struct {
 
 // unreadableCriticalLabel replaces the NotChecked label in critical groups
 // and comes last, because it is why the group blocks and says how to fix it.
-const unreadableCriticalLabel = "unreadable, not checked — give your terminal Full Disk Access (System Settings > Privacy & Security) or fix the folder's permissions, and run mtm verify again; if mtm prepare could not read them either, fix that on the old Mac and run mtm prepare first"
+const unreadableCriticalLabel = "unreadable, not checked — give your terminal Full Disk Access (System Settings > Privacy & Security) or fix the folder's permissions, and run mtm verify again. If mtm prepare also reported them unreadable, they were never recorded and mtm can't check them"
 
 func (g *group) detail() string {
 	var parts []string
