@@ -103,6 +103,7 @@ func observe(home string, rec manifest.Entry, preparedAt int64) (Observed, error
 type group struct {
 	name     string
 	critical bool
+	status   module.Status
 	counts   map[Outcome]int
 	paths    []string
 	extra    int
@@ -119,12 +120,15 @@ func (t *tally) add(rec manifest.Entry, o Outcome) {
 	name := groupOf(rec.Path, rec.Type == manifest.TypeDir || rec.Type == manifest.TypeUnreadable)
 	g := t.groups[name]
 	if g == nil {
-		g = &group{name: name, critical: rec.Area == manifest.AreaCritical, counts: map[Outcome]int{}}
+		g = &group{name: name, status: module.StatusPass, counts: map[Outcome]int{}}
 		t.groups[name] = g
 		t.order = append(t.order, name)
 	}
+	g.critical = g.critical || rec.Area == manifest.AreaCritical
 	g.counts[o]++
-	if s := statusOf(o); s == module.StatusFail || s == module.StatusWarn {
+	s := statusFor(o, rec.Area)
+	g.raise(s)
+	if s == module.StatusFail || s == module.StatusWarn {
 		if len(g.paths) < maxPathsPerGroup {
 			g.paths = append(g.paths, rec.Path)
 		} else {
@@ -140,7 +144,7 @@ func (t *tally) checks() []module.Check {
 		out = append(out, module.Check{
 			Module:   Name,
 			ID:       Name + ":" + name,
-			Status:   g.status(),
+			Status:   g.status,
 			Critical: g.critical,
 			Title:    name,
 			Detail:   g.detail(),
@@ -150,22 +154,15 @@ func (t *tally) checks() []module.Check {
 	return out
 }
 
-// status follows spec 8.4: fail beats warn, and info outcomes leave a
-// group at pass.
-func (g *group) status() module.Status {
-	status := module.StatusPass
-	for o, n := range g.counts {
-		if n == 0 {
-			continue
-		}
-		switch statusOf(o) {
-		case module.StatusFail:
-			return module.StatusFail
-		case module.StatusWarn:
-			status = module.StatusWarn
-		}
+// raise follows spec 8.4: fail beats warn, and info outcomes leave a group
+// at pass.
+func (g *group) raise(s module.Status) {
+	switch {
+	case s == module.StatusFail:
+		g.status = module.StatusFail
+	case s == module.StatusWarn && g.status != module.StatusFail:
+		g.status = module.StatusWarn
 	}
-	return status
 }
 
 var outcomeLabels = []struct {
@@ -182,15 +179,25 @@ var outcomeLabels = []struct {
 	{Corrupt, "corrupted"},
 }
 
+// unreadableCriticalLabel replaces the NotChecked label in critical groups
+// and comes last, because it is why the group blocks and says how to fix it.
+const unreadableCriticalLabel = "unreadable, not checked — give your terminal Full Disk Access (System Settings > Privacy & Security) or fix the folder's permissions, and run mtm verify again; if mtm prepare could not read them either, fix that on the old Mac and run mtm prepare first"
+
 func (g *group) detail() string {
 	var parts []string
 	for _, l := range outcomeLabels {
+		if g.critical && l.outcome == NotChecked {
+			continue
+		}
 		if n := g.counts[l.outcome]; n > 0 {
 			parts = append(parts, fmt.Sprintf("%d %s", n, l.label))
 		}
 	}
 	if g.extra > 0 {
 		parts = append(parts, fmt.Sprintf("%d more paths not listed", g.extra))
+	}
+	if n := g.counts[NotChecked]; g.critical && n > 0 {
+		parts = append(parts, fmt.Sprintf("%d %s", n, unreadableCriticalLabel))
 	}
 	return strings.Join(parts, ", ")
 }

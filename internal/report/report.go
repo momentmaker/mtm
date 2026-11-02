@@ -8,10 +8,12 @@ import (
 	"fmt"
 	"io"
 	"regexp"
+	"slices"
 	"strconv"
 	"strings"
 
 	"github.com/momentmaker/mtm/internal/module"
+	"github.com/momentmaker/mtm/internal/preflight"
 	"github.com/momentmaker/mtm/internal/redact"
 	"github.com/momentmaker/mtm/internal/verdict"
 )
@@ -147,7 +149,7 @@ func Verify(w io.Writer, checks []module.Check, v verdict.Verdict, details bool)
 	fmt.Fprintln(w)
 	if v.Safe {
 		fmt.Fprintln(w, "SAFE TO WIPE")
-		fmt.Fprintln(w, "Everything mtm recorded arrived. You can erase the old Mac, then run mtm cleanup here.")
+		fmt.Fprintf(w, "Everything mtm checked arrived%s. You can erase the old Mac, then run mtm cleanup here.\n", checkedModules(checks))
 		return
 	}
 	fmt.Fprintln(w, "NOT SAFE TO WIPE")
@@ -161,6 +163,22 @@ func Verify(w io.Writer, checks []module.Check, v verdict.Verdict, details bool)
 	for _, item := range v.Pending {
 		fmt.Fprintf(w, "  ✗ checklist: %s\n", clean(item))
 	}
+}
+
+// checkedModules names the modules whose checks the verdict rests on, so
+// the SAFE banner claims no more than what was checked. Preflight checks
+// the Macs, not the user's data.
+func checkedModules(checks []module.Check) string {
+	var names []string
+	for _, c := range checks {
+		if c.Module != preflight.Module && !slices.Contains(names, c.Module) {
+			names = append(names, c.Module)
+		}
+	}
+	if len(names) == 0 {
+		return ""
+	}
+	return " (" + clean(strings.Join(names, ", ")) + ")"
 }
 
 func writeCheck(w io.Writer, c module.Check, details bool) {

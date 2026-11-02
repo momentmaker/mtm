@@ -2,6 +2,7 @@ package files
 
 import (
 	"context"
+	"fmt"
 	"os"
 	"path/filepath"
 	"slices"
@@ -145,16 +146,88 @@ func TestVerifyIgnoresMissingVolatile(t *testing.T) {
 	}
 }
 
-func TestVerifyReportsUnreadableAsNotChecked(t *testing.T) {
+func lockDir(t *testing.T, path string) {
+	t.Helper()
+	if err := os.Chmod(path, 0); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.Chmod(path, 0o755) })
+}
+
+func TestVerifyBlocksOnUnreadableCriticalFolder(t *testing.T) {
 	home := seedHome(t)
 	testutil.WriteFile(t, filepath.Join(home, "Private/secret.txt"), "x")
-	private := filepath.Join(home, "Private")
-	os.Chmod(private, 0)
-	t.Cleanup(func() { os.Chmod(private, 0o755) })
+	lockDir(t, filepath.Join(home, "Private"))
 	m := prepareHome(t, home)
 	c := verifyHome(t, home, m)["Private"]
-	if c.Status != module.StatusPass || !strings.Contains(c.Detail, "not checked") {
-		t.Errorf("Private check = %+v, want pass noting not checked", c)
+	if c.Status != module.StatusWarn || !c.Critical || !strings.Contains(c.Detail, "not checked") || !strings.Contains(c.Detail, "Full Disk Access") {
+		t.Errorf("Private check = %+v, want critical warn naming the Full Disk Access remedy", c)
+	}
+	if !slices.Contains(c.Paths, "Private") {
+		t.Errorf("Private check paths = %q, want the unreadable folder listed", c.Paths)
+	}
+}
+
+func TestVerifyBlocksOnCriticalFolderUnreadableOnNewMac(t *testing.T) {
+	home := seedHome(t)
+	m := prepareHome(t, home)
+	lockDir(t, filepath.Join(home, "Documents"))
+	c := verifyHome(t, home, m)["Documents"]
+	if c.Status != module.StatusWarn || !c.Critical || !slices.Contains(c.Paths, "Documents/notes.md") {
+		t.Errorf("Documents check = %+v, want critical warn listing notes.md", c)
+	}
+}
+
+func TestVerifyNotesUnreadableAppStateWithoutBlocking(t *testing.T) {
+	home := seedHome(t)
+	testutil.WriteFile(t, filepath.Join(home, "Library/Private/data.db"), "x")
+	lockDir(t, filepath.Join(home, "Library/Private"))
+	m := prepareHome(t, home)
+	c := verifyHome(t, home, m)["Library/Private"]
+	if c.Status != module.StatusPass || c.Critical || !strings.Contains(c.Detail, "not checked") {
+		t.Errorf("Library/Private check = %+v, want non-critical pass noting not checked", c)
+	}
+}
+
+func TestPrepareBlocksOnUnreadableCriticalFolder(t *testing.T) {
+	home := seedHome(t)
+	testutil.WriteFile(t, filepath.Join(home, "Private/secret.txt"), "x")
+	testutil.WriteFile(t, filepath.Join(home, "Library/Private/data.db"), "x")
+	lockDir(t, filepath.Join(home, "Private"))
+	lockDir(t, filepath.Join(home, "Library/Private"))
+	st, err := stage.Open(home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	res, err := New().Prepare(module.Env{Ctx: context.Background(), Home: home}, st)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !module.HasBlocker(res.Problems) {
+		t.Fatalf("problems = %+v, want a blocker for the unreadable critical folder", res.Problems)
+	}
+	p := res.Problems[0]
+	if p.Handler != module.Manual || !strings.Contains(p.Detail, "~/Private") || strings.Contains(p.Detail, "Library") {
+		t.Errorf("blocker = %+v, want a manual blocker naming only ~/Private", p)
+	}
+	for _, want := range []string{"Full Disk Access", "sudo chown -R $(id -un)", "mtm prepare again"} {
+		if !strings.Contains(p.Fix, want) {
+			t.Errorf("fix %q missing %q", p.Fix, want)
+		}
+	}
+	if !slices.ContainsFunc(res.Done, func(d string) bool { return strings.Contains(d, "could not read 1 folder") }) {
+		t.Errorf("done = %q, want the app state unreadable count", res.Done)
+	}
+}
+
+func TestPrepareListsAtMostTwentyUnreadablePaths(t *testing.T) {
+	stats := Stats{}
+	for i := range 25 {
+		stats.Unreadable = append(stats.Unreadable, fmt.Sprintf("Dir%02d", i))
+	}
+	p := prepareProblems(stats)
+	if len(p) != 1 || !strings.Contains(p[0].Detail, "~/Dir19") || strings.Contains(p[0].Detail, "~/Dir20") || !strings.Contains(p[0].Detail, "and 5 more") {
+		t.Errorf("problems = %+v, want 20 paths and \"and 5 more\"", p)
 	}
 }
 
@@ -178,6 +251,24 @@ func TestScanReportsMissingFullDiskAccess(t *testing.T) {
 	}
 	if !slices.ContainsFunc(findings, func(f module.Finding) bool { return f.ID == "full-disk-access" }) {
 		t.Errorf("findings = %+v, want full-disk-access warning", findings)
+	}
+}
+
+func TestScanBlocksOnUnreadableDocuments(t *testing.T) {
+	home := t.TempDir()
+	docs := filepath.Join(home, "Documents")
+	os.MkdirAll(docs, 0o755)
+	lockDir(t, docs)
+	findings, err := New().Scan(module.Env{Ctx: context.Background(), Home: home})
+	if err != nil {
+		t.Fatal(err)
+	}
+	i := slices.IndexFunc(findings, func(f module.Finding) bool { return f.Severity == module.SeverityBlocker })
+	if i < 0 {
+		t.Fatalf("findings = %+v, want a blocker for ~/Documents", findings)
+	}
+	if f := findings[i]; !strings.Contains(f.Detail, "~/Documents") || !strings.Contains(f.Fix, "Full Disk Access") {
+		t.Errorf("blocker = %+v, want it to name ~/Documents and the remedy", f)
 	}
 }
 

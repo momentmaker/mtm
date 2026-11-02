@@ -314,3 +314,42 @@ func TestVerifyBlocksOnModuleThatPrepareNeverRecorded(t *testing.T) {
 		t.Errorf("safe = %v, blocking = %v; want git:not-prepared blocking", got.Verdict.Safe, blockingIDs(got))
 	}
 }
+
+func lockDir(t *testing.T, path string) {
+	t.Helper()
+	if err := os.Chmod(path, 0); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.Chmod(path, 0o755) })
+}
+
+func TestUnreadableDocumentsOnNewMacIsNotSafe(t *testing.T) {
+	old := seedHome(t)
+	prepareOld(t, old)
+	newHome := migrate(t, old)
+	lockDir(t, filepath.Join(newHome, "Documents"))
+	rep := verifyOn(t, newHome, newUUID, VerifyOptions{})
+	if rep.Verdict.Safe || !slices.Contains(blockingIDs(rep), "files:Documents") {
+		t.Errorf("safe = %v, blocking = %v; want files:Documents blocking", rep.Verdict.Safe, blockingIDs(rep))
+	}
+}
+
+func TestDocumentsUnreadableAtPrepareThenMissingIsNotSafe(t *testing.T) {
+	old := seedHome(t)
+	docs := filepath.Join(old, "Documents")
+	lockDir(t, docs)
+	rep, err := newTestApp(old, fakeMac(old, oldUUID)).Prepare(ctx, PrepareOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rep.Ready {
+		t.Error("prepare is READY although ~/Documents could not be read")
+	}
+	os.Chmod(docs, 0o755)
+	newHome := migrate(t, old)
+	os.RemoveAll(filepath.Join(newHome, "Documents"))
+	got := verifyOn(t, newHome, newUUID, VerifyOptions{})
+	if got.Verdict.Safe || !slices.Contains(blockingIDs(got), "files:Documents") {
+		t.Errorf("safe = %v, blocking = %v; want files:Documents blocking", got.Verdict.Safe, blockingIDs(got))
+	}
+}

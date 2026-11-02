@@ -74,3 +74,19 @@ func TestStatusOf(t *testing.T) {
 		}
 	}
 }
+
+func TestStatusForUnreadableDependsOnArea(t *testing.T) {
+	if got := statusFor(NotChecked, manifest.AreaCritical); got != module.StatusWarn {
+		t.Errorf("critical not checked = %q, want warn", got)
+	}
+	if got := statusFor(NotChecked, manifest.AreaAppState); got != module.StatusInfo {
+		t.Errorf("app state not checked = %q, want info", got)
+	}
+	for _, o := range []Outcome{Match, ChangedAfterPrepare, MissingVolatile, CloudOnly, MissingAppState, MissingCritical, Corrupt} {
+		for _, a := range []string{manifest.AreaCritical, manifest.AreaAppState} {
+			if got, want := statusFor(o, a), statusOf(o); got != want {
+				t.Errorf("statusFor(%v, %s) = %q, want %q", o, a, got, want)
+			}
+		}
+	}
+}

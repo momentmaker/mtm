@@ -63,6 +63,15 @@ func Classify(rec manifest.Entry, obs Observed, preparedAt int64, isVolatile fun
 	return Match
 }
 
+// statusFor is statusOf with one exception: critical data that could not
+// be read is unverified, so it must block SAFE TO WIPE (spec 8.5 rule 2).
+func statusFor(o Outcome, area string) module.Status {
+	if o == NotChecked && area == manifest.AreaCritical {
+		return module.StatusWarn
+	}
+	return statusOf(o)
+}
+
 func statusOf(o Outcome) module.Status {
 	switch o {
 	case Match:

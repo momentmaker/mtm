@@ -29,6 +29,9 @@ func TestVerifyBanners(t *testing.T) {
 	if !strings.Contains(safe.String(), "SAFE TO WIPE") || strings.Contains(safe.String(), "NOT SAFE") {
 		t.Errorf("safe output:\n%s", safe.String())
 	}
+	if !strings.Contains(safe.String(), "Everything mtm checked arrived (files).") || strings.Contains(safe.String(), "recorded arrived") {
+		t.Errorf("safe banner should name what was checked without over-claiming:\n%s", safe.String())
+	}
 	fail := []module.Check{{Module: "files", ID: "files:.ssh", Status: module.StatusFail, Critical: true, Title: ".ssh", Detail: "1 missing"}}
 	var notSafe bytes.Buffer
 	Verify(&notSafe, fail, verdict.Decide(fail, nil), false)
@@ -90,5 +93,19 @@ func TestJSONScrubsAndStaysValid(t *testing.T) {
 	}
 	if !json.Valid(out.Bytes()) || strings.Contains(out.String(), "sha256:") {
 		t.Errorf("JSON output = %s", out.String())
+	}
+}
+
+func TestSafeBannerNamesCheckedModules(t *testing.T) {
+	checks := []module.Check{
+		{Module: "preflight", ID: "version", Status: module.StatusWarn, Title: "Different mtm version"},
+		{Module: "files", ID: "files:GitHub", Status: module.StatusPass, Title: "GitHub"},
+		{Module: "git", ID: "git:GitHub/app", Status: module.StatusPass, Critical: true, Title: "~/GitHub/app"},
+		{Module: "files", ID: "files:record", Status: module.StatusPass, Title: "record"},
+	}
+	var out bytes.Buffer
+	Verify(&out, checks, verdict.Decide(checks, nil), false)
+	if !strings.Contains(out.String(), "Everything mtm checked arrived (files, git).") {
+		t.Errorf("safe banner should list files, git once each and skip preflight:\n%s", out.String())
 	}
 }
