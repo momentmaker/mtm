@@ -183,6 +183,33 @@ func TestScanWarnsAboutLocalOnlyWork(t *testing.T) {
 	}
 }
 
+func TestScanReportsUncommittedChanges(t *testing.T) {
+	home := t.TempDir()
+	repo := seedRepo(t, home)
+	testutil.WriteFile(t, filepath.Join(repo, "README.md"), "hello, edited\n")
+	findings, err := New().Scan(testEnv(home, nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	i := slices.IndexFunc(findings, func(f module.Finding) bool { return f.ID == "local-only:GitHub/app" })
+	if i < 0 || !strings.Contains(findings[i].Detail, "1 file with uncommitted changes") {
+		t.Errorf("findings = %+v, want the modified README counted", findings)
+	}
+}
+
+func TestRisksCountChangedTrackedFiles(t *testing.T) {
+	r := Repo{Status: []string{
+		"# branch.head main",
+		"1 .M N... 100644 100644 100644 h1 h2 a.go",
+		"2 R. N... 100644 100644 100644 h1 h2 R100 b.go\x00old.go",
+		"u UU N... 100644 100644 100644 100644 h1 h2 h3 c.go",
+		"? notes.txt",
+	}, Untracked: []string{"notes.txt"}}
+	if got := strings.Join(r.risks(), ", "); !strings.Contains(got, "3 files with uncommitted changes") {
+		t.Errorf("risks = %q, want 3 files with uncommitted changes", got)
+	}
+}
+
 func TestPrepareRecordsRepoState(t *testing.T) {
 	home := t.TempDir()
 	seedRepo(t, home)

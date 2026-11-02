@@ -171,6 +171,9 @@ func (r Repo) risks() []string {
 	if n := len(r.Stash); n > 0 {
 		out = append(out, plural(n, "stash", "stashes"))
 	}
+	if n := r.changedTracked(); n > 0 {
+		out = append(out, plural(n, "file with uncommitted changes", "files with uncommitted changes"))
+	}
 	if n := len(r.Untracked); n > 0 {
 		out = append(out, plural(n, "untracked file", "untracked files"))
 	}
@@ -178,6 +181,18 @@ func (r Repo) risks() []string {
 		out = append(out, plural(n, "ignored file that looks like a secret or local config", "ignored files that look like secrets or local config"))
 	}
 	return out
+}
+
+// changedTracked counts the status records for tracked files with changes:
+// ordinary (1), renamed or copied (2), and unmerged (u).
+func (r Repo) changedTracked() int {
+	n := 0
+	for _, rec := range r.Status {
+		if strings.HasPrefix(rec, "1 ") || strings.HasPrefix(rec, "2 ") || strings.HasPrefix(rec, "u ") {
+			n++
+		}
+	}
+	return n
 }
 
 func displayPath(rel string) string {
