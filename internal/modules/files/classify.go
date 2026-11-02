@@ -29,6 +29,7 @@ type Observed struct {
 	Size       int64
 	MTime      int64
 	Target     string
+	Resolves   bool
 	Hash       string
 }
 
@@ -36,7 +37,9 @@ type Observed struct {
 // after prepare is a normal change, not damage. Folders are checked for
 // presence only, because their times change whenever an entry is added.
 // An entry type this mtm doesn't know comes from a newer or damaged record
-// and can't be verified, so it fails.
+// and can't be verified, so it fails. A link whose target existed at
+// prepare and is gone now lost that data wherever it lived, even if the
+// link itself was rewritten.
 func Classify(rec manifest.Entry, obs Observed, preparedAt int64, isVolatile func(string) bool) Outcome {
 	switch {
 	case !knownType(rec.Type):
@@ -55,6 +58,8 @@ func Classify(rec manifest.Entry, obs Observed, preparedAt int64, isVolatile fun
 		return NotChecked
 	case obs.Dataless:
 		return CloudOnly
+	case rec.Type == manifest.TypeLink && rec.Resolves && obs.Type == manifest.TypeLink && !obs.Resolves:
+		return Corrupt
 	case rec.Type != manifest.TypeDir && changedAfterPrepare(rec, obs, preparedAt):
 		return ChangedAfterPrepare
 	case obs.Type != rec.Type:

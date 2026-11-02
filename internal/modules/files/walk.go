@@ -19,6 +19,7 @@ type item struct {
 	abs        string
 	info       fs.FileInfo
 	target     string
+	resolves   bool
 	cloud      bool
 	unreadable bool
 }
@@ -66,6 +67,8 @@ func visit(ctx context.Context, home, rel string, skip pathset.Set, emit func(it
 		if it.target, err = os.Readlink(abs); err != nil {
 			return skipOrUnreadable(err, rel, abs, emit)
 		}
+		_, err = os.Stat(abs)
+		it.resolves = err == nil
 		return emit(it)
 	case mode.IsDir():
 		entries, err := os.ReadDir(abs)

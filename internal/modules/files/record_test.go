@@ -144,6 +144,30 @@ func TestRecordNeverFollowsSymlinks(t *testing.T) {
 	}
 }
 
+func TestRecordMarksLinksThatResolve(t *testing.T) {
+	home := t.TempDir()
+	testutil.WriteFile(t, filepath.Join(home, "GitHub/app/main.go"), "package main\n")
+	outside := t.TempDir()
+	for name, target := range map[string]string{"applink": "GitHub/app", "dangling": "nowhere", "code": outside} {
+		if err := os.Symlink(target, filepath.Join(home, name)); err != nil {
+			t.Fatal(err)
+		}
+	}
+	entries, stats := recordHome(t, home, false)
+	for name, want := range map[string]bool{"applink": true, "dangling": false, "code": true} {
+		if got := entries[name].Resolves; got != want {
+			t.Errorf("%s Resolves = %v, want %v", name, got, want)
+		}
+	}
+	real, err := filepath.EvalSymlinks(outside)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{"~/code → " + real}; !slices.Equal(stats.outside.shown, want) {
+		t.Errorf("links outside home = %q, want %q", stats.outside.shown, want)
+	}
+}
+
 func TestRecordMarksUnreadableFolders(t *testing.T) {
 	home := t.TempDir()
 	testutil.WriteFile(t, filepath.Join(home, "Private/secret.txt"), "x")

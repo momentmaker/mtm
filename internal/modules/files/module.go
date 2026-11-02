@@ -75,6 +75,17 @@ func prepareProblems(stats Stats) []module.Finding {
 			Fix:      accessFix("mtm prepare"),
 		})
 	}
+	if n := stats.outside.len(); n > 0 {
+		problems = append(problems, module.Finding{
+			Module:   Name,
+			ID:       "outside-links",
+			Severity: module.SeverityWarn,
+			Handler:  module.Manual,
+			Title:    plural(n, "link in your home folder leads", "links in your home folder lead") + " outside it",
+			Detail:   stats.outside.String(),
+			Fix:      "mtm only checks your home folder. Make sure those locations are copied or backed up before you erase this Mac.",
+		})
+	}
 	return problems
 }
 

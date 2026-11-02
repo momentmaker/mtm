@@ -407,3 +407,19 @@ func TestVerifyFailsOnModuleRecordedByNewerMtm(t *testing.T) {
 		t.Error("verify --only files reported the unknown module")
 	}
 }
+
+func TestLinkToDataOutsideHomeThatDidNotArriveIsNotSafe(t *testing.T) {
+	old := seedHome(t)
+	outside := filepath.Join(t.TempDir(), "Work", "code")
+	testutil.WriteFile(t, filepath.Join(outside, "precious.go"), "package p\n")
+	if err := os.Symlink(outside, filepath.Join(old, "code")); err != nil {
+		t.Fatal(err)
+	}
+	prepareOld(t, old)
+	newHome := migrate(t, old)
+	os.RemoveAll(outside)
+	rep := verifyOn(t, newHome, newUUID, VerifyOptions{})
+	if rep.Verdict.Safe || !slices.Contains(blockingIDs(rep), "files:"+files.HomeGroup) {
+		t.Errorf("safe = %v, blocking = %v; want files:%s blocking", rep.Verdict.Safe, blockingIDs(rep), files.HomeGroup)
+	}
+}

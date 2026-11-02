@@ -20,16 +20,19 @@ const (
 )
 
 // Entry is one line of the file record. Path is relative to the home
-// folder and uses forward slashes. MTime is in Unix nanoseconds.
+// folder and uses forward slashes. MTime is in Unix nanoseconds. Resolves
+// is set on a link whose target existed at prepare; records written before
+// it existed read as false.
 type Entry struct {
-	Path   string `json:"p"`
-	Type   string `json:"t"`
-	Size   int64  `json:"s,omitempty"`
-	MTime  int64  `json:"m,omitempty"`
-	Mode   uint32 `json:"mode,omitempty"`
-	Hash   string `json:"h,omitempty"`
-	Target string `json:"target,omitempty"`
-	Area   string `json:"area"`
+	Path     string `json:"p"`
+	Type     string `json:"t"`
+	Size     int64  `json:"s,omitempty"`
+	MTime    int64  `json:"m,omitempty"`
+	Mode     uint32 `json:"mode,omitempty"`
+	Hash     string `json:"h,omitempty"`
+	Target   string `json:"target,omitempty"`
+	Resolves bool   `json:"r,omitempty"`
+	Area     string `json:"area"`
 }
 
 type RecordWriter struct {

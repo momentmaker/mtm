@@ -244,6 +244,63 @@ func TestPrepareListsAtMostTwentyUnreadablePaths(t *testing.T) {
 	}
 }
 
+func TestVerifyFailsWhenLinkTargetOutsideHomeVanished(t *testing.T) {
+	home := seedHome(t)
+	outside := filepath.Join(t.TempDir(), "code")
+	testutil.WriteFile(t, filepath.Join(outside, "precious.go"), "package p\n")
+	if err := os.Symlink(outside, filepath.Join(home, "code")); err != nil {
+		t.Fatal(err)
+	}
+	m := prepareHome(t, home)
+	assertAllPass(t, verifyHome(t, home, m))
+	os.RemoveAll(outside)
+	c := verifyHome(t, home, m)[HomeGroup]
+	if c.Status != module.StatusFail || !slices.Contains(c.Paths, "code") {
+		t.Errorf("home group = %+v, want fail listing the dangling link", c)
+	}
+}
+
+func TestVerifyReportsLinkTargetUnreadableOnNewMac(t *testing.T) {
+	home := seedHome(t)
+	if err := os.Symlink("Documents/notes.md", filepath.Join(home, "notes")); err != nil {
+		t.Fatal(err)
+	}
+	m := prepareHome(t, home)
+	lockDir(t, filepath.Join(home, "Documents"))
+	c := verifyHome(t, home, m)[HomeGroup]
+	if c.Status != module.StatusWarn || !strings.Contains(c.Detail, "not checked") {
+		t.Errorf("home group = %+v, want warn: link target unreadable, not dangling", c)
+	}
+}
+
+func TestPrepareWarnsAboutLinksOutsideHome(t *testing.T) {
+	home := seedHome(t)
+	outside := t.TempDir()
+	if err := os.Symlink(outside, filepath.Join(home, "code")); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Symlink("Documents", filepath.Join(home, "docs")); err != nil {
+		t.Fatal(err)
+	}
+	st, err := stage.Open(home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	res, err := New().Prepare(module.Env{Ctx: context.Background(), Home: home}, st)
+	if err != nil {
+		t.Fatal(err)
+	}
+	real, _ := filepath.EvalSymlinks(outside)
+	i := slices.IndexFunc(res.Problems, func(f module.Finding) bool { return f.ID == "outside-links" })
+	if i < 0 {
+		t.Fatalf("problems = %+v, want a warning about ~/code", res.Problems)
+	}
+	p := res.Problems[i]
+	if p.Severity != module.SeverityWarn || !strings.Contains(p.Detail, "~/code → "+real) || strings.Contains(p.Detail, "~/docs") || !strings.Contains(p.Fix, "mtm only checks your home folder") {
+		t.Errorf("warning = %+v", p)
+	}
+}
+
 func TestVerifyWorksAfterCopyToDifferentHome(t *testing.T) {
 	home := seedHome(t)
 	m := prepareHome(t, home)

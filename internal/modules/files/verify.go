@@ -81,6 +81,13 @@ func observe(home string, rec manifest.Entry, preparedAt int64) (Observed, error
 		if obs.Target, err = os.Readlink(abs); err != nil {
 			return Observed{}, fmt.Errorf("read link %s: %w", abs, err)
 		}
+		if rec.Resolves {
+			_, err := os.Stat(abs)
+			if errors.Is(err, fs.ErrPermission) {
+				return Observed{Exists: true, Unreadable: true}, nil
+			}
+			obs.Resolves = err == nil
+		}
 	case mode.IsDir():
 		obs.Type = manifest.TypeDir
 	default:
