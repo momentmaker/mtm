@@ -16,6 +16,7 @@ const (
 	MissingAppState
 	CloudOnly
 	NotChecked
+	OnOtherVolume
 )
 
 // Observed is what verify finds at a recorded path on the new Mac. Hash is
@@ -44,6 +45,8 @@ func Classify(rec manifest.Entry, obs Observed, preparedAt int64, isVolatile fun
 	switch {
 	case !knownType(rec.Type):
 		return Corrupt
+	case rec.Type == manifest.TypeMount:
+		return OnOtherVolume
 	case rec.Type == manifest.TypeCloud:
 		return CloudOnly
 	case rec.Type == manifest.TypeUnreadable:
@@ -82,7 +85,7 @@ func changedAfterPrepare(rec manifest.Entry, obs Observed, preparedAt int64) boo
 
 func knownType(t string) bool {
 	switch t {
-	case manifest.TypeFile, manifest.TypeDir, manifest.TypeLink, manifest.TypeCloud, manifest.TypeUnreadable:
+	case manifest.TypeFile, manifest.TypeDir, manifest.TypeLink, manifest.TypeCloud, manifest.TypeUnreadable, manifest.TypeMount:
 		return true
 	}
 	return false

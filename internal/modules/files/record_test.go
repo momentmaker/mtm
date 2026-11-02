@@ -204,3 +204,21 @@ func TestRecordSkipsPipes(t *testing.T) {
 		t.Error("recorded a named pipe")
 	}
 }
+
+func TestMountPointEntry(t *testing.T) {
+	home := t.TempDir()
+	testutil.WriteFile(t, filepath.Join(home, "mnt/inside.txt"), "x")
+	info, err := os.Lstat(filepath.Join(home, "mnt"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	e := toEntry(item{rel: "mnt", abs: filepath.Join(home, "mnt"), info: info, mount: true})
+	if e.Type != manifest.TypeMount || e.Area != manifest.AreaCritical {
+		t.Errorf("entry = %+v, want a critical-area mount", e)
+	}
+	var stats Stats
+	stats.add(e)
+	if stats.Entries != 1 || !slices.Equal(stats.mounts.shown, []string{"~/mnt"}) {
+		t.Errorf("stats = %+v, want one entry and ~/mnt listed as a mount", stats)
+	}
+}

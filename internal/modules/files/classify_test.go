@@ -60,6 +60,8 @@ func TestClassify(t *testing.T) {
 		{"link target gone, link rewritten after prepare", resolving, Observed{Exists: true, Type: manifest.TypeLink, Target: "GitHub", MTime: 1_500}, notVolatile, Corrupt},
 		{"link target still there", resolving, Observed{Exists: true, Type: manifest.TypeLink, Target: "GitHub", MTime: 900, Resolves: true}, notVolatile, Match},
 		{"old record, link dangling now", link, Observed{Exists: true, Type: manifest.TypeLink, Target: "GitHub", MTime: 900}, notVolatile, Match},
+		{"mount point, critical", manifest.Entry{Path: "code", Type: manifest.TypeMount, Area: manifest.AreaCritical}, Observed{}, notVolatile, OnOtherVolume},
+		{"mount point, app state", manifest.Entry{Path: "Library/Vol", Type: manifest.TypeMount, Area: manifest.AreaAppState}, Observed{}, notVolatile, OnOtherVolume},
 		{"missing, unknown area", manifest.Entry{Path: "x", Type: manifest.TypeFile, Area: "future"}, Observed{}, notVolatile, MissingCritical},
 		{"unknown type", manifest.Entry{Path: "x", Type: "future", Area: manifest.AreaCritical}, same, notVolatile, Corrupt},
 		{"unknown type, missing", manifest.Entry{Path: "x", Type: "future", Area: manifest.AreaAppState}, Observed{}, notVolatile, Corrupt},
@@ -115,5 +117,19 @@ func TestUnknownAreaCountsAsCritical(t *testing.T) {
 	tl.add(manifest.Entry{Path: "Library/Future/x", Type: manifest.TypeFile, Area: "future"}, MissingCritical)
 	if c := tl.checks()[0]; !c.Critical || c.Status != module.StatusFail {
 		t.Errorf("check = %+v, want a critical fail", c)
+	}
+}
+
+func TestMountPointNeverBlocks(t *testing.T) {
+	for _, a := range []string{manifest.AreaCritical, manifest.AreaAppState} {
+		if got := statusFor(OnOtherVolume, a); got != module.StatusInfo {
+			t.Errorf("statusFor(OnOtherVolume, %s) = %q, want info", a, got)
+		}
+	}
+	tl := newTally()
+	tl.add(manifest.Entry{Path: "code", Type: manifest.TypeMount, Area: manifest.AreaCritical}, OnOtherVolume)
+	c := tl.checks()[0]
+	if c.Title != "code" || c.Status != module.StatusPass || c.Detail != "1 on another volume, not checked" {
+		t.Errorf("check = %+v, want its own passing group noting the volume", c)
 	}
 }

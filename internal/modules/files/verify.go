@@ -126,7 +126,7 @@ type tally struct {
 func newTally() *tally { return &tally{groups: map[string]*group{}} }
 
 func (t *tally) add(rec manifest.Entry, o Outcome) {
-	name := groupOf(rec.Path, rec.Type == manifest.TypeDir || rec.Type == manifest.TypeUnreadable)
+	name := groupOf(rec.Path, rec.Type == manifest.TypeDir || rec.Type == manifest.TypeUnreadable || rec.Type == manifest.TypeMount)
 	g := t.groups[name]
 	if g == nil {
 		g = &group{name: name, status: module.StatusPass, counts: map[Outcome]int{}}
@@ -183,6 +183,7 @@ var outcomeLabels = []struct {
 	{MissingVolatile, "missing (expected)"},
 	{CloudOnly, "cloud-only"},
 	{NotChecked, "not checked (unreadable)"},
+	{OnOtherVolume, "on another volume, not checked"},
 	{MissingAppState, "missing"},
 	{MissingCritical, "missing"},
 	{Corrupt, "corrupted"},

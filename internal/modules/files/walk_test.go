@@ -1,10 +1,16 @@
 package files
 
 import (
+	"context"
 	"fmt"
 	"io/fs"
+	"path/filepath"
+	"slices"
 	"syscall"
 	"testing"
+
+	"github.com/momentmaker/mtm/internal/pathset"
+	"github.com/momentmaker/mtm/internal/testutil"
 )
 
 func TestSkipOrUnreadable(t *testing.T) {
@@ -39,5 +45,35 @@ func TestSkipOrUnreadable(t *testing.T) {
 				t.Errorf("emitted %+v, want nothing", got)
 			}
 		})
+	}
+}
+
+func TestWalkRecordsMountPointWithoutDescending(t *testing.T) {
+	home := t.TempDir()
+	testutil.WriteFile(t, filepath.Join(home, "mnt/inside.txt"), "x")
+	testutil.WriteFile(t, filepath.Join(home, "Docs/a.txt"), "y")
+	var got []string
+	var mounts []string
+	w := walker{
+		ctx:         context.Background(),
+		home:        home,
+		skip:        pathset.MustNew(),
+		otherVolume: func(info fs.FileInfo) bool { return info.Name() == "mnt" },
+		emit: func(it item) error {
+			got = append(got, it.rel)
+			if it.mount {
+				mounts = append(mounts, it.rel)
+			}
+			return nil
+		},
+	}
+	if err := w.walk(); err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{"Docs", "Docs/a.txt", "mnt"}; !slices.Equal(got, want) {
+		t.Errorf("walked %q, want %q", got, want)
+	}
+	if !slices.Equal(mounts, []string{"mnt"}) {
+		t.Errorf("mounts = %q, want [mnt]", mounts)
 	}
 }

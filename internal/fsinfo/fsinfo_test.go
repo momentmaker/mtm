@@ -32,6 +32,24 @@ func TestIsDataless(t *testing.T) {
 	}
 }
 
+func TestOtherVolume(t *testing.T) {
+	onHome := fakeInfo{sys: &syscall.Stat_t{Dev: 5}}
+	onOther := fakeInfo{sys: &syscall.Stat_t{Dev: 6}}
+	other := OtherVolume(onHome)
+	if other(onHome) {
+		t.Error("item on the same volume reported as other")
+	}
+	if !other(onOther) {
+		t.Error("item on a different volume not detected")
+	}
+	if other(fakeInfo{}) {
+		t.Error("item without a volume id reported as other")
+	}
+	if OtherVolume(fakeInfo{})(onOther) {
+		t.Error("unknown reference volume reported an item as other")
+	}
+}
+
 func TestHashFile(t *testing.T) {
 	path := filepath.Join(t.TempDir(), "f")
 	os.WriteFile(path, []byte("hello\n"), 0o600)

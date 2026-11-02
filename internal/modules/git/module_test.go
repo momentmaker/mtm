@@ -119,7 +119,7 @@ func TestDiscoverSkipsFoldersItCannotRead(t *testing.T) {
 		}
 	}
 	broken := filepath.Join(home, "broken")
-	f := &finder{ctx: context.Background(), home: home, maxDepth: 6, readDir: func(dir string) ([]fs.DirEntry, error) {
+	f := &finder{ctx: context.Background(), home: home, maxDepth: 6, otherVolume: sameVolume, readDir: func(dir string) ([]fs.DirEntry, error) {
 		if dir == broken {
 			return nil, &fs.PathError{Op: "open", Path: dir, Err: syscall.EIO}
 		}
@@ -128,6 +128,26 @@ func TestDiscoverSkipsFoldersItCannotRead(t *testing.T) {
 	got, err := f.find()
 	if err != nil {
 		t.Fatalf("find: %v, want the broken folder skipped", err)
+	}
+	if want := []string{"GitHub/app"}; !slices.Equal(got, want) {
+		t.Errorf("find = %q, want %q", got, want)
+	}
+}
+
+func sameVolume(fs.FileInfo) bool { return false }
+
+func TestDiscoverStaysOnTheHomeVolume(t *testing.T) {
+	home := t.TempDir()
+	for _, dir := range []string{"GitHub/app/.git", "mnt/repo/.git"} {
+		if err := os.MkdirAll(filepath.Join(home, dir), 0o755); err != nil {
+			t.Fatal(err)
+		}
+	}
+	f := &finder{ctx: context.Background(), home: home, maxDepth: 6, readDir: os.ReadDir,
+		otherVolume: func(info fs.FileInfo) bool { return info.Name() == "mnt" }}
+	got, err := f.find()
+	if err != nil {
+		t.Fatal(err)
 	}
 	if want := []string{"GitHub/app"}; !slices.Equal(got, want) {
 		t.Errorf("find = %q, want %q", got, want)

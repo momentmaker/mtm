@@ -23,6 +23,7 @@ type Stats struct {
 	Unreadable    []string `json:"unreadable,omitempty"`
 
 	outside pathList
+	mounts  pathList
 }
 
 func (s *Stats) add(e manifest.Entry) {
@@ -34,6 +35,8 @@ func (s *Stats) add(e manifest.Entry) {
 		s.Cloud++
 	case e.Type == manifest.TypeUnreadable:
 		s.Unreadable = append(s.Unreadable, e.Path)
+	case e.Type == manifest.TypeMount:
+		s.mounts.add(displayPath(e.Path))
 	}
 }
 
@@ -161,6 +164,8 @@ func toEntry(it item) manifest.Entry {
 	switch {
 	case it.unreadable:
 		e.Type = manifest.TypeUnreadable
+	case it.mount:
+		e.Type = manifest.TypeMount
 	case it.cloud:
 		e.Type = manifest.TypeCloud
 		e.Size = it.info.Size()

@@ -14,6 +14,7 @@ const (
 	TypeLink       = "l"
 	TypeCloud      = "cloud"
 	TypeUnreadable = "unreadable"
+	TypeMount      = "mount"
 
 	AreaCritical = "critical"
 	AreaAppState = "appstate"

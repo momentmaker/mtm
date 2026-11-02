@@ -324,6 +324,15 @@ func TestScanReportsMissingFullDiskAccess(t *testing.T) {
 	}
 }
 
+func TestPrepareWarnsAboutMountPoints(t *testing.T) {
+	var stats Stats
+	stats.add(manifest.Entry{Path: "code", Type: manifest.TypeMount, Area: manifest.AreaCritical})
+	p := prepareProblems(stats)
+	if len(p) != 1 || p[0].Severity != module.SeverityWarn || p[0].Detail != "~/code" || !strings.Contains(p[0].Fix, "back it up before you erase this Mac") {
+		t.Errorf("problems = %+v, want one warning naming ~/code", p)
+	}
+}
+
 func TestScanBlocksOnUnreadableDocuments(t *testing.T) {
 	home := t.TempDir()
 	docs := filepath.Join(home, "Documents")

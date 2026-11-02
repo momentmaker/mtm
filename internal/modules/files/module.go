@@ -86,6 +86,17 @@ func prepareProblems(stats Stats) []module.Finding {
 			Fix:      "mtm only checks your home folder. Make sure those locations are copied or backed up before you erase this Mac.",
 		})
 	}
+	if stats.mounts.len() > 0 {
+		problems = append(problems, module.Finding{
+			Module:   Name,
+			ID:       "mounts",
+			Severity: module.SeverityWarn,
+			Handler:  module.Manual,
+			Title:    "Separate volumes in your home folder: mtm doesn't check them",
+			Detail:   stats.mounts.String(),
+			Fix:      "If one of these is on this Mac's internal disk, back it up before you erase this Mac.",
+		})
+	}
 	return problems
 }
 

@@ -23,20 +23,26 @@ var skipDirs = pathset.MustNew(
 )
 
 // discover returns home-relative paths of git repos, in sorted walk order,
-// down to maxDepth folders below home. Symlinks are not followed.
+// down to maxDepth folders below home. Symlinks are not followed, and the
+// search stays on the home folder's volume, like the files walk.
 func discover(ctx context.Context, home string, maxDepth int) ([]string, error) {
-	f := &finder{ctx: ctx, home: home, maxDepth: maxDepth, readDir: os.ReadDir}
+	info, err := os.Stat(home)
+	if err != nil {
+		return nil, fmt.Errorf("read home folder %s: %w", home, err)
+	}
+	f := &finder{ctx: ctx, home: home, maxDepth: maxDepth, readDir: os.ReadDir, otherVolume: fsinfo.OtherVolume(info)}
 	return f.find()
 }
 
-// finder holds one discovery walk. readDir is a field so tests can make a
-// folder fail to read.
+// finder holds one discovery walk. readDir and otherVolume are fields so
+// tests can make a folder fail to read or stand in a mount point.
 type finder struct {
-	ctx      context.Context
-	home     string
-	maxDepth int
-	readDir  func(string) ([]fs.DirEntry, error)
-	repos    []string
+	ctx         context.Context
+	home        string
+	maxDepth    int
+	readDir     func(string) ([]fs.DirEntry, error)
+	otherVolume func(fs.FileInfo) bool
+	repos       []string
 }
 
 func (f *finder) find() ([]string, error) {
@@ -73,7 +79,7 @@ func (f *finder) visit(rel string, depth int) error {
 			continue
 		}
 		info, err := e.Info()
-		if err != nil || fsinfo.IsDataless(info) {
+		if err != nil || fsinfo.IsDataless(info) || f.otherVolume(info) {
 			continue
 		}
 		if err := f.visit(child, depth+1); err != nil {
