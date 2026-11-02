@@ -285,17 +285,25 @@ Otherwise **NOT SAFE TO WIPE**, followed by the blocking items. Exit codes: `0` 
 ### 9.3 `homebrew`
 - Every `brew` command runs with `HOMEBREW_NO_AUTO_UPDATE=1` and `HOMEBREW_NO_ANALYTICS=1`, so Homebrew makes no network calls on `mtm`'s behalf (section 6.2, rule 2). A test runs each `brew` command `mtm` uses under a `sandbox-exec` profile that denies network access and asserts it still succeeds (section 11).
 - `scan` and `prepare` record the output of `brew services list --json`. `prepare` also saves `brew bundle dump --file=- --formula --cask --tap --mas` into `~/.mtm/Brewfile` (written by `mtm` with mode 0600). The type flags matter: without them, `brew bundle dump` also asks cargo, go, npm, and VS Code for their packages, and cargo's rustup reaches the network. Homebrew has removed `--describe`, and the dump now includes descriptions by default.
+- **Package-data cache.** Before any other brew command, `mtm` checks that Homebrew's API cache (`$(brew --cache)/api`) holds package data. Without it, brew would download from formulae.brew.sh on `mtm`'s behalf. In that case, `scan`, `finish`, and `verify` warn, and `prepare` blocks, keeping the earlier record. The message is: run `brew update` yourself (it uses the network), then run the command again.
+  - Known gap: Homebrew 7 reads only the package file for the running macOS. A new Mac on a newer macOS than the old one can pass this check and still download. See IMPLEMENTATION_PLAN.md.
+- **Who owns a service.** `brew services list` run as the user reports:
+  - `brew services run` services with no user;
+  - root services (in `/Library/LaunchDaemons`) as `none` or `stopped`, with user `root`, because the user can't see the system domain.
+  - So a service with no user, or with this user, and any status other than `none` or `stopped`, is the user's.
+  - A service with user `root` or another user is a root service. Whether it is loaded is checked with `launchctl print system/<label>`, which works without root.
 - **`prepare`:**
-  - Stops running services that run as the user, with `brew services stop`, and records which ones it stopped.
+  - Stops the user's active services with `brew services stop` and records them.
   - On a re-run, services the earlier run stopped stay recorded as stopped, so `finish` still restarts them.
-  - Services running as root (or as another user) are printed as `sudo brew services stop <name>` for the user to run.
-  - A service that fails to stop is a blocker, because its data would be copied mid-write.
-- **`prepare --undo`:** restarts what `prepare` stopped. Root services are printed as `sudo brew services start` commands.
-- **`finish`:** restarts the same services on the new Mac, printing the same kind of commands for root services.
+  - A root service that is loaded is a **blocker**: stop it with `sudo brew services stop <name>`, then run `prepare` again. Its data would otherwise be copied mid-write. It is recorded with its label, so `finish` prints the restart command.
+  - A user service that fails to stop is a blocker for the same reason.
+  - A failed `brew services list` blocks and keeps the earlier record.
+- **`prepare --undo`:** restarts what `prepare` stopped. Root services are printed as `sudo brew services start` commands. Names in every printed command are shell-quoted.
+- **`finish`:** restarts the same services on the new Mac, with `brew services start` (so a `run` service now also starts at login). It prints the same kind of commands for root services.
 - **`verify`:**
   - Homebrew is present, which is a fail otherwise.
   - `brew bundle check --file ~/.mtm/Brewfile --no-upgrade --verbose`: missing packages are a warn, with the `brew bundle install` command.
-  - Services that were running are running again, which is a warn otherwise.
+  - The user's services that were stopped are `started` again, and root services are loaded again (`launchctl print system/<label>`). Each is a warn otherwise.
 
 ### 9.4 `toolchains`
 - Records path and version for: brew, git, node, npm, pnpm, bun, deno, python3, uv, go, rustc, cargo, ruby, java, asdf, mise.
@@ -374,7 +382,13 @@ Otherwise **NOT SAFE TO WIPE**, followed by the blocking items. Exit codes: `0` 
   - fingerprints of `/etc/hosts`, `/etc/shells`, `/etc/paths.d/*`, `/etc/pam.d/sudo_local` (Touch ID for sudo). Copies go into `~/.mtm/exports/etc/` so `finish` can print an exact restore command. These files hold configuration, not secrets;
   - app inventory of `/Applications` and `~/Applications`, including one level of subfolders, skipping Apple's own `com.apple.*` apps and symlinks. Each app records its bundle id, version (`plutil -extract … raw`), and architectures (`lipo -archs`). Home apps are recorded as `~/Applications/…`.
 - **`scan` and `prepare`:** warn about Intel-only apps. They need Rosetta on the new Mac, and Rosetta is limited after macOS 27.
-- **`finish`:** prints `sudo softwareupdate --install-rosetta --agree-to-license` if Rosetta is needed and missing. Also prints `sudo cp ~/.mtm/exports/etc/<file> /etc/<file>` for each `/etc` file that differs, and `chsh -s <shell>` (after adding the shell to `/etc/shells`, if needed) when the login shell changed. Paths are shell-quoted.
+- **`finish`:**
+  - Prints `sudo softwareupdate --install-rosetta --agree-to-license` if Rosetta is needed and missing.
+  - For each `/etc` file that differs, prints `sudo install -m 0644 -o root -g wheel <copy> /etc/<file>`. `install` rather than `cp`, because the private copy is 0600 and `cp` would give a new `/etc` file that mode.
+  - When the login shell changed, prints one line to paste: `echo <shell> | sudo tee -a /etc/shells >/dev/null && chsh -s <shell>`, without the `tee` part if the shell is already listed.
+  - Paths are shell-quoted for sh, zsh, and fish.
+- An `/etc` file that can't be read doesn't stop the module. `prepare` warns that it won't be restored, and `verify` treats it as changed.
+- An app counts as Intel-only only when its architectures include neither `arm64` nor `arm64e`.
 - **`verify`:**
   - The recorded login shell must exist: fail.
   - A changed shell, or one not listed in `/etc/shells`: warn.

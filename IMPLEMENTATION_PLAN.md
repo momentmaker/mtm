@@ -40,6 +40,28 @@ Found in the final review and deliberately deferred. None of them can produce a 
 **Plan**: `docs/superpowers/plans/2026-11-02-mtm-stage2-machine-state.md`
 **Status**: Complete
 
+### Known gaps carried out of Stage 2
+Found in the final review and its re-review. Fix the first two before relying on Stage 2.
+- **`prepare --undo` fails on a Mac without Homebrew.** The Homebrew module checks the package-data cache before checking that Homebrew is installed, so `undo` errors and keeps the record. Fix: return an empty result when the record says Homebrew isn't installed (and when nothing was stopped).
+- **brew can still download package data.** Homebrew 7 reads only `api/internal/packages.<tag>.jws.json` for the running macOS. mtm accepts any `*.jws.json`, so a new Mac on a newer macOS than the old one (or an old Mac upgraded since brew last refreshed) passes the check, and then `finish`/`verify` download. Preferred fix: run mtm's brew commands under the same `sandbox-exec` deny-network profile the no-network test uses, so a needed download fails and becomes "run brew update yourself". The alternative, matching the macOS codename, breaks on every new macOS release.
+- **Real-run validation pending.** Stopping and restarting services was proven with fakes only. The success criterion "prepare stops and --undo restarts brew services on the author's M3" still needs a run with a throwaway service, or in a VM.
+- **Homebrew edge cases:**
+  - an earlier "Homebrew not installed" record is kept when a later prepare fails, so verify could skip Homebrew (`keepPrevious` should require `Installed`);
+  - a restarted `scheduled` service warns "not running" in verify;
+  - users with `HOMEBREW_NO_INSTALL_FROM_API` hit a permanent cache blocker;
+  - `sudo brew services run X` is invisible;
+  - `HOMEBREW_FORCE_API_AUTO_UPDATE` isn't unset;
+  - `run` services restarted with `start` also launch at login, on both Macs;
+  - an undo that only partly worked still drops the record;
+  - a failed manifest save after prepare stopped services loses the stop record.
+- **Pasting fix texts:** fix lines that end ", then run mtm prepare again" aren't one-line pasteable (harmless; brew rejects the extra words).
+- **Shells:** tcsh and nushell can't print the PATH, so toolchains blocks prepare for those users. A version command that fails on both Macs reads "unknown" and passes.
+- **Undo leaves the files, git, and system records trusted** while saying "back in use". Stage 4's `retire` covers changes made after prepare.
+- **finish:** exits 1 whenever manual steps remain. `finish --only` is missing; Stage 3 needs it for Docker.
+- **system:** Apple-managed `paths.d` files can be suggested for overwrite (suggest a diff instead). Apps with the same bundle id collapse across roots. An unreadable vendor folder skips its apps silently.
+- **loginitems:** symlinked agent plists are skipped. Login item names containing ", " split wrongly. Its scan can't be tested inside `sandbox-exec`, because launchctl is unavailable there.
+- **Defense in depth:** consider running every external command mtm launches (brew, the login shell, tool `--version`) under the deny-network sandbox.
+
 ## Stage 3: Docker Desktop and Postgres
 **Goal**: the `docker` module (volume and locally built image export without network or helper images, content digests, skipping the restore when `Docker.raw` arrived intact, `compose up --pull never`) and `databases` (safety-net `pg_dumpall`, clean stop, `--restore-dump`). Adds free-space checks with a 10 GB reserve, `prepare --stage` on an encrypted APFS volume, export fingerprint checks before restore, and skipping steps whose inputs are unchanged on re-run.
 **Success Criteria**: integration tests against a real Docker Desktop export, delete, and restore a volume with a matching digest. A non-empty mismatched volume is never overwritten without `--force`.
