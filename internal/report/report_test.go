@@ -185,7 +185,19 @@ func TestFinishBlockedSaysToRunAgain(t *testing.T) {
 func TestUndoSaysToPrepareAgain(t *testing.T) {
 	var out bytes.Buffer
 	Undo(&out, []string{"homebrew: started postgresql@16"}, nil)
-	if !strings.Contains(out.String(), "Run mtm prepare again") {
+	if !strings.Contains(out.String(), "This Mac is back in use. Run mtm prepare again before Migration Assistant.") {
+		t.Errorf("undo output:\n%s", out.String())
+	}
+}
+
+func TestUndoWithProblemsDoesNotClaimTheMacIsBackInUse(t *testing.T) {
+	var out bytes.Buffer
+	Undo(&out, nil, []module.Finding{{
+		Module: "homebrew", Severity: module.SeverityWarn, Handler: module.Manual,
+		Title: "Could not start postgresql@16", Fix: "Run: brew services start 'postgresql@16'",
+	}})
+	if !strings.Contains(out.String(), "Some things could not be put back; do the steps above, then run mtm prepare again before Migration Assistant.") ||
+		strings.Contains(out.String(), "back in use") {
 		t.Errorf("undo output:\n%s", out.String())
 	}
 }

@@ -167,6 +167,11 @@ func runUndo(ctx context.Context, a *app.App, stdout, stderr io.Writer) int {
 		fmt.Fprintln(stderr, "mtm prepare --undo:", err)
 		return exitProblems
 	case err != nil:
+		// Undo can fail after it restarted services, when saving the
+		// record fails; the user still needs to know what is running.
+		if len(rep.Done) > 0 || len(rep.Problems) > 0 {
+			report.Undo(stdout, rep.Done, rep.Problems)
+		}
 		fmt.Fprintln(stderr, "mtm prepare --undo:", err)
 		return exitFailed
 	}

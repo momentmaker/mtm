@@ -192,10 +192,15 @@ func Finish(w io.Writer, done []string, problems []module.Finding) {
 	fmt.Fprintln(w, "Next: run mtm verify")
 }
 
-// Undo prints what prepare --undo put back.
+// Undo prints what prepare --undo put back. With problems, the Mac is not
+// fully back in use until the user does the steps listed.
 func Undo(w io.Writer, done []string, problems []module.Finding) {
 	writeDone(w, done)
 	writeProblems(w, "Problems", problems)
+	if len(problems) > 0 {
+		fmt.Fprintln(w, "Some things could not be put back; do the steps above, then run mtm prepare again before Migration Assistant.")
+		return
+	}
 	fmt.Fprintln(w, "This Mac is back in use. Run mtm prepare again before Migration Assistant.")
 }
 
