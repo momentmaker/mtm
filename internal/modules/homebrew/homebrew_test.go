@@ -572,3 +572,40 @@ func TestHasPackageData(t *testing.T) {
 		})
 	}
 }
+
+func TestUndoWithNothingForHomebrewToUndoRunsNoCommand(t *testing.T) {
+	tests := []struct {
+		name string
+		inv  Inventory
+		gone bool
+	}{
+		{"no Homebrew on this Mac", Inventory{}, true},
+		{"installed but nothing stopped", Inventory{Installed: true, Brewfile: true}, false},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			f := newFixture(t)
+			if tt.gone {
+				f.mod.Brew = filepath.Join(t.TempDir(), "nope")
+			}
+			res, err := f.mod.Undo(f.env(record(t, tt.inv)), f.st)
+			if err != nil || !reflect.DeepEqual(res, module.Result{}) {
+				t.Errorf("Undo = %+v, %v; want an empty result and no error", res, err)
+			}
+			if calls := f.fake.Calls(); len(calls) != 0 {
+				t.Errorf("ran %v; want no command", calls)
+			}
+		})
+	}
+}
+
+func TestFinishWithNothingToRestartRunsNoCommand(t *testing.T) {
+	f := newFixture(t)
+	res, err := f.mod.Finish(f.env(record(t, Inventory{Installed: true, Brewfile: true})), f.st)
+	if err != nil || !reflect.DeepEqual(res, module.Result{}) {
+		t.Errorf("Finish = %+v, %v; want an empty result and no error", res, err)
+	}
+	if calls := f.fake.Calls(); len(calls) != 0 {
+		t.Errorf("ran %v; want no command", calls)
+	}
+}

@@ -367,12 +367,23 @@ func (m Module) saveBrewfile(env module.Env, st *stage.Stage) error {
 	return st.WriteFile(BrewfileName, out.Stdout)
 }
 
+// nothingToRestart is true when the record holds no service to start, so
+// no brew command is needed: a Mac without Homebrew can't run brew --cache.
+func (inv Inventory) nothingToRestart() bool {
+	return len(inv.Stopped) == 0 && len(inv.Root) == 0
+}
+
 // Undo fails without package data rather than report it: an error keeps
 // the record, so prepare --undo can start the services once brew is ready.
+// With nothing to start it succeeds without running brew, or a Mac without
+// Homebrew could never clear its record.
 func (m Module) Undo(env module.Env, _ *stage.Stage) (module.Result, error) {
 	var inv Inventory
 	if _, err := module.LoadInventory(env, Name, &inv); err != nil {
 		return module.Result{}, err
+	}
+	if !inv.Installed || inv.nothingToRestart() {
+		return module.Result{}, nil
 	}
 	if err := m.checkCache(env); err != nil {
 		return module.Result{}, errors.New(describe(noCache(module.SeverityBlocker, "prepare --undo", err)))
@@ -394,6 +405,9 @@ func (m Module) Finish(env module.Env, st *stage.Stage) (module.Result, error) {
 			Title: "Homebrew is missing on this Mac",
 			Fix:   "Migration Assistant should have copied it. Copy it from the old Mac before you erase it, or reinstall Homebrew and run: brew bundle install --file " + macos.ShellQuote(st.Path(BrewfileName)),
 		}}}, nil
+	}
+	if inv.nothingToRestart() {
+		return module.Result{}, nil
 	}
 	if err := m.checkCache(env); err != nil {
 		return module.Result{Problems: []module.Finding{noCache(module.SeverityWarn, "finish", err)}}, nil
