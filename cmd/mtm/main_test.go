@@ -161,3 +161,34 @@ func TestVerifyOnSameMacExitsOneWhenNotSafe(t *testing.T) {
 		t.Errorf("exit %d, want %d and NOT SAFE TO WIPE:\n%s%s", code, exitProblems, out.String(), errOut.String())
 	}
 }
+
+func fileVaultOnApp(home string) *app.App {
+	return &app.App{Runner: &runner.Fake{Responses: testutil.MacResponses("AAAA")}, Home: home, Version: "test", Now: time.Now}
+}
+
+func TestFinishWithoutRecordFails(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	var out, errOut bytes.Buffer
+	code := run(ctx, []string{"finish"}, &out, &errOut, fileVaultOnApp)
+	if code != exitFailed || !strings.Contains(errOut.String(), "run mtm prepare") {
+		t.Errorf("code %d stderr %q", code, errOut.String())
+	}
+}
+
+func TestPrepareUndoRejectsOtherFlags(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	var out, errOut bytes.Buffer
+	code := run(ctx, []string{"prepare", "--undo", "--only", "git"}, &out, &errOut, fileVaultOnApp)
+	if code != exitFailed || !strings.Contains(errOut.String(), "can't be combined") {
+		t.Errorf("code %d stderr %q", code, errOut.String())
+	}
+}
+
+func TestPrepareUndoWithoutRecordFails(t *testing.T) {
+	t.Setenv("HOME", t.TempDir())
+	var out, errOut bytes.Buffer
+	code := run(ctx, []string{"prepare", "--undo"}, &out, &errOut, fileVaultOnApp)
+	if code != exitFailed || !strings.Contains(errOut.String(), "run mtm prepare") {
+		t.Errorf("code %d stderr %q", code, errOut.String())
+	}
+}

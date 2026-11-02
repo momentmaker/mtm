@@ -144,30 +144,59 @@ Next:
      not from a Time Machine backup. A Thunderbolt cable between the Macs is fastest.
   3. On this Mac, open Migration Assistant and choose "To another Mac".
   4. Select every category.
-  5. When it finishes, open Terminal on the new Mac and run: mtm verify
+  5. When it finishes, open Terminal on the new Mac and run: mtm finish, then mtm verify
 `
 
+func writeDone(w io.Writer, done []string) {
+	if len(done) == 0 {
+		return
+	}
+	fmt.Fprintln(w, "Done")
+	for _, d := range done {
+		fmt.Fprintf(w, "  ✓ %s\n", clean(d))
+	}
+	fmt.Fprintln(w)
+}
+
+func writeProblems(w io.Writer, title string, problems []module.Finding) {
+	if len(problems) == 0 {
+		return
+	}
+	fmt.Fprintln(w, title)
+	for _, p := range problems {
+		writeFinding(w, p)
+	}
+	fmt.Fprintln(w)
+}
+
 func Prepare(w io.Writer, ready bool, done []string, problems []module.Finding) {
-	if len(done) > 0 {
-		fmt.Fprintln(w, "Done")
-		for _, d := range done {
-			fmt.Fprintf(w, "  ✓ %s\n", clean(d))
-		}
-		fmt.Fprintln(w)
-	}
-	if len(problems) > 0 {
-		fmt.Fprintln(w, "Problems")
-		for _, p := range problems {
-			writeFinding(w, p)
-		}
-		fmt.Fprintln(w)
-	}
+	writeDone(w, done)
+	writeProblems(w, "Problems", problems)
 	if !ready {
 		fmt.Fprintln(w, "NOT READY FOR MIGRATION ASSISTANT")
 		fmt.Fprintln(w, "Fix the problems marked ✗ and run mtm prepare again.")
 		return
 	}
 	fmt.Fprint(w, readyText)
+}
+
+// Finish prints what finish did and what is left to do by hand.
+func Finish(w io.Writer, done []string, problems []module.Finding) {
+	writeDone(w, done)
+	if module.HasBlocker(problems) {
+		writeProblems(w, "Problems", problems)
+		fmt.Fprintln(w, "Fix the problems marked ✗ and run mtm finish again.")
+		return
+	}
+	writeProblems(w, "Do these by hand", problems)
+	fmt.Fprintln(w, "Next: run mtm verify")
+}
+
+// Undo prints what prepare --undo put back.
+func Undo(w io.Writer, done []string, problems []module.Finding) {
+	writeDone(w, done)
+	writeProblems(w, "Problems", problems)
+	fmt.Fprintln(w, "This Mac is back in use. Run mtm prepare again before Migration Assistant.")
 }
 
 func Verify(w io.Writer, checks []module.Check, v verdict.Verdict, details bool) {

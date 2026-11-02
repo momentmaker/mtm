@@ -19,8 +19,9 @@ const (
 	NewMac Machine = "new"
 )
 
-// Env is what a module gets to work with. Manifest is set on the new Mac
-// and nil during scan and prepare.
+// Env is what a module gets to work with. Manifest is the record: on the
+// new Mac, the one verify and finish check against; during prepare, this
+// Mac's previous record (empty on the first run); nil during scan.
 type Env struct {
 	Ctx      context.Context
 	Run      runner.Runner
@@ -90,6 +91,12 @@ type Module interface {
 	Prepare(env Env, st *stage.Stage) (Result, error)
 	Finish(env Env, st *stage.Stage) (Result, error)
 	Verify(env Env, st *stage.Stage) ([]Check, error)
+}
+
+// Undoer is implemented by modules whose prepare changes the old Mac, so
+// prepare --undo can put it back.
+type Undoer interface {
+	Undo(env Env, st *stage.Stage) (Result, error)
 }
 
 var ErrNotPrepared = errors.New("not recorded by mtm prepare on the old Mac")

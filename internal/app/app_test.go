@@ -423,3 +423,182 @@ func TestLinkToDataOutsideHomeThatDidNotArriveIsNotSafe(t *testing.T) {
 		t.Errorf("safe = %v, blocking = %v; want files:%s blocking", rep.Verdict.Safe, blockingIDs(rep), files.HomeGroup)
 	}
 }
+
+// stepModule records which steps ran, to test the orchestration of
+// prepare, finish, and undo without touching the machine.
+type stepModule struct {
+	name  string
+	calls *[]string
+}
+
+func (m stepModule) Name() string                            { return m.name }
+func (stepModule) Scan(module.Env) ([]module.Finding, error) { return nil, nil }
+
+func (m stepModule) Prepare(env module.Env, _ *stage.Stage) (module.Result, error) {
+	call := "prepare"
+	if _, ok := env.Manifest.Modules[m.name]; ok {
+		call = "prepare-again"
+	}
+	*m.calls = append(*m.calls, call)
+	return module.Result{Inventory: map[string]bool{"ok": true}}, nil
+}
+
+func (m stepModule) Finish(module.Env, *stage.Stage) (module.Result, error) {
+	*m.calls = append(*m.calls, "finish")
+	return module.Result{
+		Done:     []string{"started things"},
+		Problems: []module.Finding{{Module: m.name, ID: "by-hand", Severity: module.SeverityWarn, Handler: module.Manual, Title: "Do a thing"}},
+	}, nil
+}
+
+func (m stepModule) Verify(module.Env, *stage.Stage) ([]module.Check, error) {
+	return []module.Check{{Module: m.name, ID: m.name + ":ok", Status: module.StatusPass, Title: "ok"}}, nil
+}
+
+func (m stepModule) Undo(module.Env, *stage.Stage) (module.Result, error) {
+	*m.calls = append(*m.calls, "undo")
+	return module.Result{Done: []string{"restarted things"}}, nil
+}
+
+// finishOnly has no Undo, like the files and git modules.
+type finishOnly struct{ name string }
+
+func (m finishOnly) Name() string                            { return m.name }
+func (finishOnly) Scan(module.Env) ([]module.Finding, error) { return nil, nil }
+func (finishOnly) Prepare(module.Env, *stage.Stage) (module.Result, error) {
+	return module.Result{Inventory: true}, nil
+}
+func (finishOnly) Finish(module.Env, *stage.Stage) (module.Result, error) {
+	return module.Result{}, nil
+}
+func (m finishOnly) Verify(module.Env, *stage.Stage) ([]module.Check, error) {
+	return []module.Check{{Module: m.name, ID: m.name + ":ok", Status: module.StatusPass, Title: "ok"}}, nil
+}
+
+func stepApp(home, uuid string, mods ...module.Module) *App {
+	return &App{Runner: fakeMac(home, uuid), Home: home, Version: "test", Now: time.Now, Modules: mods}
+}
+
+func mustPrepare(t *testing.T, a *App) {
+	t.Helper()
+	rep, err := a.Prepare(ctx, PrepareOptions{})
+	if err != nil || !rep.Ready {
+		t.Fatalf("prepare = %+v, %v", rep, err)
+	}
+}
+
+func TestPrepareShowsModulesTheirPreviousRecord(t *testing.T) {
+	home := t.TempDir()
+	var calls []string
+	a := stepApp(home, oldUUID, stepModule{name: "svc", calls: &calls})
+	mustPrepare(t, a)
+	mustPrepare(t, a)
+	if want := []string{"prepare", "prepare-again"}; !slices.Equal(calls, want) {
+		t.Errorf("calls = %q, want %q", calls, want)
+	}
+}
+
+func TestFinishRunsRecordedModulesOnTheNewMac(t *testing.T) {
+	old := t.TempDir()
+	var calls []string
+	step := stepModule{name: "svc", calls: &calls}
+	mustPrepare(t, stepApp(old, oldUUID, step))
+	newHome := migrate(t, old)
+	unrecorded := stepModule{name: "extra", calls: &calls}
+	rep, err := stepApp(newHome, newUUID, step, unrecorded).Finish(ctx)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(rep.Done, []string{"svc: started things"}) || len(rep.Problems) != 1 {
+		t.Errorf("report = %+v", rep)
+	}
+	if want := []string{"prepare", "finish"}; !slices.Equal(calls, want) {
+		t.Errorf("calls = %q, want %q (an unrecorded module must not run)", calls, want)
+	}
+}
+
+func TestFinishRefusesOnTheOldMac(t *testing.T) {
+	home := t.TempDir()
+	var calls []string
+	a := stepApp(home, oldUUID, stepModule{name: "svc", calls: &calls})
+	mustPrepare(t, a)
+	if _, err := a.Finish(ctx); !errors.Is(err, ErrFinishOnOldMac) {
+		t.Errorf("err = %v, want ErrFinishOnOldMac", err)
+	}
+	if slices.Contains(calls, "finish") {
+		t.Error("finish ran on the old Mac")
+	}
+}
+
+func TestFinishNeedsFileVault(t *testing.T) {
+	old := t.TempDir()
+	var calls []string
+	step := stepModule{name: "svc", calls: &calls}
+	mustPrepare(t, stepApp(old, oldUUID, step))
+	newHome := migrate(t, old)
+	a := stepApp(newHome, newUUID, step)
+	a.Runner.(*runner.Fake).Responses["/usr/bin/fdesetup status"] = runner.Response{Stdout: "FileVault is Off.\n"}
+	rep, err := a.Finish(ctx)
+	if err != nil || !module.HasBlocker(rep.Problems) {
+		t.Errorf("Finish = %+v, %v; want a FileVault blocker", rep, err)
+	}
+	if slices.Contains(calls, "finish") {
+		t.Error("finish ran without FileVault")
+	}
+}
+
+func TestUndoRestoresAndForgetsTheRecord(t *testing.T) {
+	old := t.TempDir()
+	var calls []string
+	step := stepModule{name: "svc", calls: &calls}
+	keep := finishOnly{name: "plain"}
+	a := stepApp(old, oldUUID, step, keep)
+	mustPrepare(t, a)
+	rep, err := a.Undo(ctx)
+	if err != nil || !slices.Equal(rep.Done, []string{"svc: restarted things"}) {
+		t.Fatalf("Undo = %+v, %v", rep, err)
+	}
+	st, err := stage.Existing(old)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m, err := manifest.Load(st)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if _, ok := m.Modules["svc"]; ok {
+		t.Error("undone module still has a record")
+	}
+	if _, ok := m.Modules["plain"]; !ok {
+		t.Error("a module without Undo lost its record")
+	}
+	vrep, err := stepApp(migrate(t, old), newUUID, step, keep).Verify(ctx, VerifyOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Contains(blockingIDs(vrep), "svc:not-prepared") {
+		t.Errorf("blocking = %v, want svc:not-prepared after undo", blockingIDs(vrep))
+	}
+}
+
+func TestUndoRefusesOnTheNewMac(t *testing.T) {
+	old := t.TempDir()
+	var calls []string
+	step := stepModule{name: "svc", calls: &calls}
+	mustPrepare(t, stepApp(old, oldUUID, step))
+	newHome := migrate(t, old)
+	if _, err := stepApp(newHome, newUUID, step).Undo(ctx); !errors.Is(err, ErrUndoOnNewMac) {
+		t.Errorf("err = %v, want ErrUndoOnNewMac", err)
+	}
+	if slices.Contains(calls, "undo") {
+		t.Error("undo ran on the new Mac")
+	}
+}
+
+func TestUndoWithoutRecord(t *testing.T) {
+	home := t.TempDir()
+	var calls []string
+	if _, err := stepApp(home, oldUUID, stepModule{name: "svc", calls: &calls}).Undo(ctx); !errors.Is(err, stage.ErrNotFound) {
+		t.Errorf("err = %v, want stage.ErrNotFound", err)
+	}
+}

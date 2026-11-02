@@ -24,6 +24,8 @@ import (
 
 var (
 	ErrOtherMacsRecord = errors.New("~/.mtm holds the record from another Mac, and prepare would overwrite it")
+	ErrFinishOnOldMac  = errors.New("this is the Mac that ran prepare; run mtm finish on the new Mac after Migration Assistant")
+	ErrUndoOnNewMac    = errors.New("~/.mtm holds the record from another Mac; prepare --undo only works on the Mac that ran prepare")
 	ErrNotVerified     = errors.New("mtm verify has not reported SAFE TO WIPE on this Mac; run mtm verify first, or pass --force to delete ~/.mtm anyway")
 )
 
@@ -58,6 +60,20 @@ type VerifyOptions struct {
 type VerifyReport struct {
 	Checks  []module.Check  `json:"checks"`
 	Verdict verdict.Verdict `json:"verdict"`
+}
+
+// StepReport is what finish or prepare --undo did, and what is left to do
+// by hand.
+type StepReport struct {
+	Done     []string         `json:"done"`
+	Problems []module.Finding `json:"problems"`
+}
+
+func (r *StepReport) add(name string, res module.Result) {
+	for _, d := range res.Done {
+		r.Done = append(r.Done, name+": "+d)
+	}
+	r.Problems = append(r.Problems, res.Problems...)
 }
 
 // Scan reports what mtm, Migration Assistant, and the user will each
@@ -121,7 +137,7 @@ func (a *App) Prepare(ctx context.Context, opts PrepareOptions) (PrepareReport, 
 	m.Hostname, _ = os.Hostname()
 
 	startedAt := a.Now()
-	env := a.env(ctx, module.OldMac, opts.Deep, nil, run)
+	env := a.env(ctx, module.OldMac, opts.Deep, m, run)
 	for _, mod := range mods {
 		res, err := mod.Prepare(env, st)
 		if err != nil {
@@ -160,10 +176,7 @@ func (a *App) Verify(ctx context.Context, opts VerifyOptions) (VerifyReport, err
 		return VerifyReport{}, err
 	}
 	defer logFile.Close()
-	m, err := manifest.Load(st)
-	if errors.Is(err, fs.ErrNotExist) {
-		return VerifyReport{}, fmt.Errorf("~/.mtm has no record from the old Mac; run mtm prepare there before Migration Assistant: %w", err)
-	}
+	m, err := loadRecord(st)
 	if err != nil {
 		return VerifyReport{}, err
 	}
@@ -225,6 +238,105 @@ func (a *App) Verify(ctx context.Context, opts VerifyOptions) (VerifyReport, err
 		return VerifyReport{}, err
 	}
 	return VerifyReport{Checks: checks, Verdict: v}, nil
+}
+
+// Finish restores, on the new Mac, what prepare set aside on the old one.
+// It refuses on the old Mac, where it would restart what prepare stopped.
+func (a *App) Finish(ctx context.Context) (StepReport, error) {
+	if problems := preflight.Check(ctx, a.Runner); module.HasBlocker(problems) {
+		return StepReport{Problems: problems}, nil
+	}
+	st, err := stage.Existing(a.Home)
+	if err != nil {
+		return StepReport{}, err
+	}
+	logFile, run, err := a.openLog(st, "finish")
+	if err != nil {
+		return StepReport{}, err
+	}
+	defer logFile.Close()
+	m, err := loadRecord(st)
+	if err != nil {
+		return StepReport{}, err
+	}
+	info, err := preflight.Gather(ctx, run)
+	if err != nil {
+		return StepReport{}, err
+	}
+	if info.MachineID == m.MachineID {
+		return StepReport{}, ErrFinishOnOldMac
+	}
+	env := a.env(ctx, module.NewMac, false, m, run)
+	var rep StepReport
+	for _, mod := range a.Modules {
+		if _, ok := m.Modules[mod.Name()]; !ok {
+			continue
+		}
+		res, err := mod.Finish(env, st)
+		if err != nil {
+			rep.Problems = append(rep.Problems, moduleFailure(mod.Name(), "finish", err))
+			continue
+		}
+		rep.add(mod.Name(), res)
+	}
+	return rep, nil
+}
+
+// Undo puts the old Mac back in use when the migration is called off.
+// Undone modules lose their record: it describes a state that no longer
+// holds, so verify must not trust it.
+func (a *App) Undo(ctx context.Context) (StepReport, error) {
+	st, err := stage.Existing(a.Home)
+	if err != nil {
+		return StepReport{}, err
+	}
+	logFile, run, err := a.openLog(st, "undo")
+	if err != nil {
+		return StepReport{}, err
+	}
+	defer logFile.Close()
+	m, err := loadRecord(st)
+	if err != nil {
+		return StepReport{}, err
+	}
+	info, err := preflight.Gather(ctx, run)
+	if err != nil {
+		return StepReport{}, err
+	}
+	if info.MachineID != m.MachineID {
+		return StepReport{}, ErrUndoOnNewMac
+	}
+	env := a.env(ctx, module.OldMac, false, m, run)
+	var rep StepReport
+	for _, mod := range a.Modules {
+		u, ok := mod.(module.Undoer)
+		if !ok {
+			continue
+		}
+		if _, recorded := m.Modules[mod.Name()]; !recorded {
+			continue
+		}
+		res, err := u.Undo(env, st)
+		if err != nil {
+			rep.Problems = append(rep.Problems, moduleFailure(mod.Name(), "undo", err))
+			continue
+		}
+		delete(m.Modules, mod.Name())
+		rep.add(mod.Name(), res)
+	}
+	if err := manifest.Save(st, m); err != nil {
+		return rep, err
+	}
+	return rep, nil
+}
+
+// loadRecord reads the manifest prepare wrote, explaining a missing one.
+func loadRecord(st *stage.Stage) (*manifest.Manifest, error) {
+	m, err := manifest.Load(st)
+	if errors.Is(err, fs.ErrNotExist) {
+		return nil, fmt.Errorf("~/.mtm has no record from the old Mac; run mtm prepare there before Migration Assistant: %w", err)
+	}
+	return m, err
 }
 
 // Cleanup deletes ~/.mtm. Without force, it requires a SAFE TO WIPE result

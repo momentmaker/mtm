@@ -160,3 +160,40 @@ func TestJSONKeepsControlCharactersEscapedAndValid(t *testing.T) {
 	}
 	assertNoRawControls(t, out.String())
 }
+
+func TestFinishListsByHandStepsThenVerify(t *testing.T) {
+	var out bytes.Buffer
+	Finish(&out, []string{"homebrew: started postgresql@16"}, []module.Finding{{
+		Module: "system", Severity: module.SeverityWarn, Handler: module.Manual,
+		Title: "Intel-only apps need Rosetta", Fix: "Run: sudo softwareupdate --install-rosetta --agree-to-license",
+	}})
+	for _, want := range []string{"✓ homebrew: started postgresql@16", "Do these by hand", "→ Run: sudo softwareupdate", "Next: run mtm verify"} {
+		if !strings.Contains(out.String(), want) {
+			t.Errorf("output missing %q:\n%s", want, out.String())
+		}
+	}
+}
+
+func TestFinishBlockedSaysToRunAgain(t *testing.T) {
+	var out bytes.Buffer
+	Finish(&out, nil, []module.Finding{{Module: "preflight", Severity: module.SeverityBlocker, Title: "FileVault is off"}})
+	if !strings.Contains(out.String(), "run mtm finish again") || strings.Contains(out.String(), "Next: run mtm verify") {
+		t.Errorf("blocked output:\n%s", out.String())
+	}
+}
+
+func TestUndoSaysToPrepareAgain(t *testing.T) {
+	var out bytes.Buffer
+	Undo(&out, []string{"homebrew: started postgresql@16"}, nil)
+	if !strings.Contains(out.String(), "Run mtm prepare again") {
+		t.Errorf("undo output:\n%s", out.String())
+	}
+}
+
+func TestReadyTextNamesFinish(t *testing.T) {
+	var out bytes.Buffer
+	Prepare(&out, true, nil, nil)
+	if !strings.Contains(out.String(), "mtm finish, then mtm verify") {
+		t.Errorf("ready text:\n%s", out.String())
+	}
+}
