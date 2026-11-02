@@ -75,7 +75,7 @@ Apple publishes no list of what Migration Assistant skips. The findings below co
 
 | Step | Where | Command | What happens |
 |---|---|---|---|
-| 1 | Old Mac | `mtm scan` | Read-only report in three groups: handled by Migration Assistant, handled by `mtm`, manual with a guide. Flags blockers: FileVault off, macOS older than 26, repos with unpushed commits, stashes, or untracked files, export size larger than free space, Intel-only apps that need Rosetta. |
+| 1 | Old Mac | `mtm scan` | Read-only report in three groups: handled by Migration Assistant, handled by `mtm`, manual with a guide. **Blockers** (prepare refuses until fixed): not Apple Silicon, macOS older than 26, FileVault off, export size larger than free space. **Warnings**: repos with unpushed commits, stashes, untracked or secret-like ignored files (Migration Assistant copies them, but nowhere else has them), Intel-only apps that need Rosetta, and no Full Disk Access. |
 | 2 | Old Mac | `mtm prepare` | Exports Docker volumes and locally built images, dumps Postgres, stops services cleanly, writes the record to `~/.mtm/`. Records the prepare time and prints Migration Assistant instructions. Must be the last step on the old Mac before Migration Assistant. |
 | 3 | Both | Migration Assistant | The user runs it **directly Mac to Mac** (Thunderbolt cable recommended), **during the new Mac's first-boot setup** so no second user account is created, with every category selected. |
 | 4 | New Mac | `mtm finish` | `mtm` is already present because Migration Assistant copies `/opt/homebrew`. Restores Docker data only if Migration Assistant didn't bring it intact, restarts services, re-registers launch agents, then starts the checklist. |
@@ -205,6 +205,7 @@ volatile = ["~/Library/Application Support/com.raycast.macos/*.log"]
 ```
 ~/.mtm/
   manifest.json      schema version, mtm version, macOS version and build, hostname,
+                     machine id (SHA-256 of the hardware UUID, never the raw UUID),
                      prepare time, per-module inventories, export fingerprints, checklist items
   files.jsonl.gz     file record, one JSON object per line
   Brewfile           output of brew bundle dump, kept as a fallback
@@ -229,7 +230,7 @@ All paths in the record are relative to the home folder, so verification works i
 - **Roots:** the home folder. `/Applications` is recorded as an app inventory (bundle id, version, architectures) by the `system` module, not file by file.
 - **Areas:** everything in the home folder outside `~/Library` is `critical`. `~/Library` is `appstate`. Browser profiles inside `~/Library` are also checked by the `browsers` module, whose checks can be critical (section 9.9).
 - **Fingerprinted by default:** dotfiles at the top of the home folder, `~/.ssh`, `~/.gnupg`, `~/.config`, untracked and important ignored files in repos (section 9.2), and all exports.
-- **Excluded:** `~/Library/Caches`, `~/.Trash`, `~/Library/Logs`, `~/.mtm`, paths Time Machine excludes (`tmutil isexcluded`), and catalog volatile paths.
+- **Excluded:** `~/Library/Caches`, sandboxed app caches (`~/Library/Containers/*/Data/Library/Caches`, `~/Library/Group Containers/*/Library/Caches`), `~/.Trash`, `~/Library/Logs`, `~/.mtm`, and the Docker Desktop VM folder (checked by the `docker` module instead). Time Machine exclusions are deliberately not used: a direct Migration Assistant transfer copies those paths anyway, and checking each one would cost a command per file.
 - **Cloud-only files:** files with the `SF_DATALESS` flag are recorded as `cloud` with size and time but never opened. Opening them would start a download.
 - **Unreadable locations** (privacy-protected without Full Disk Access) are recorded as `unreadable` and listed in the report.
 
@@ -244,11 +245,11 @@ All paths in the record are relative to the home folder, so verification works i
 | Missing, `appstate` area | warn |
 | Recorded as `cloud` | info: expected to return through the cloud provider |
 
-Files on the new Mac that are not in the record are ignored. Reports group results by top-level folder with counts. `--details` lists every path.
+Files on the new Mac that are not in the record are ignored. Reports group results by top-level folder (by the first two levels inside `~/Library`), one check per group. A group's status is `fail` if any file in it failed, otherwise `warn` if any file warned, otherwise `pass`. Info outcomes are counted in the group's detail and leave the status at `pass`. `--details` lists every path.
 
 ### 8.5 Verdict
 **SAFE TO WIPE** requires all of:
-1. No check in any module has status `fail`.
+1. No check in any module has status `fail`. This includes the preflight checks: FileVault is on, and `verify` is running on a different Mac from the one that ran `prepare` (compared by machine id).
 2. Every check marked critical has status `pass`, not `warn` or `info`. Critical checks are those from `git`, `secrets` identities, `docker` volumes, `databases`, and `critical`-area files.
 3. Every checklist item is either done or skipped with a recorded reason (`mtm checklist skip <id> --reason "..."`).
 
@@ -263,14 +264,22 @@ Otherwise **NOT SAFE TO WIPE**, followed by the blocking items. Exit codes: `0` 
 
 ### 9.2 `git`
 - **Finding repos:** `.git` directories under the home folder, excluding `~/Library` and `node_modules`. Search depth is configurable.
+- **Every git command** runs with `--no-optional-locks` and `-c core.fsmonitor=false`, so `mtm` never rewrites a repo's index or starts background daemons.
 - **Recorded per repo:**
-  - all refs with commit hashes (`git for-each-ref`);
+  - local refs with commit hashes (`git for-each-ref`). Remote-tracking refs are skipped, because their commits exist on the remote;
+  - HEAD (symbolic ref and commit);
   - the stash list;
-  - status (`git status --porcelain=v2 --branch --untracked-files=all`);
-  - branches with no upstream, and commits not on any remote (`git rev-list --branches --not --remotes`);
-  - fingerprints of untracked files, and of ignored files matching the important-file patterns (`.env*`, `*.pem`, `*.key`, `*.p12`, `*.local.*`, configurable).
-- **`scan`:** unpushed commits, stashes, and untracked files are warnings with paths. Migration Assistant copies them, but they exist nowhere else once the old Mac is wiped.
-- **`verify`:** refs, stash, status, and important-file fingerprints must match. Any difference is a critical fail. `--deep` adds `git fsck --connectivity-only`.
+  - status (`git status --porcelain=v2 --branch -z --untracked-files=all --ignored=matching`; NUL-separated, so any file name parses);
+  - the number of commits not on any remote (`git rev-list --count --branches --not --remotes`). This also covers local branches without an upstream;
+  - fingerprints and modification times of untracked files, and of ignored files matching the important-file patterns (`.env*`, `*.pem`, `*.key`, `*.p12`, `*.local.*`).
+- **`scan`:** unpushed commits, stashes, untracked files, and important ignored files are warnings. Migration Assistant copies them, but they exist nowhere else once the old Mac is wiped.
+- **`verify`** (a critical check per repo) fails when:
+  - the repo is missing or unreadable;
+  - any recorded commit (refs, HEAD, stash) is missing from the object database (`git cat-file --batch-check`);
+  - an important or untracked file is missing;
+  - an important or untracked file's content differs and it was not modified after `prepare`.
+- **Notes, not failures:** refs that moved and status changes since `prepare`, such as a fetch or a commit on the new Mac.
+- **`--deep`** adds `git fsck --connectivity-only`.
 
 ### 9.3 `homebrew`
 - Every `brew` command runs with `HOMEBREW_NO_AUTO_UPDATE=1` and `HOMEBREW_NO_ANALYTICS=1`, so Homebrew makes no network calls on `mtm`'s behalf (section 6.2, rule 2). A test runs each `brew` command `mtm` uses under a `sandbox-exec` profile that denies network access and asserts it still succeeds (section 11).
@@ -358,6 +367,7 @@ Otherwise **NOT SAFE TO WIPE**, followed by the blocking items. Exit codes: `0` 
 - **Undo for the old Mac.** `prepare --undo` restarts the services and containers `prepare` stopped, for when the user calls off the migration.
 - **Free space.** Each export checks free space first and keeps at least 10 GB free. If an export will not fit, `prepare` stops before writing it and suggests `--stage` on an encrypted external volume.
 - **Migration Assistant problems.** `verify` lists what is missing. `mtm` explains the options: copy the specific missing paths from the old Mac, or erase the new Mac and run Migration Assistant again during first-boot setup.
+- **Wrong Mac.** `prepare` refuses to overwrite a record made on a different Mac (for example, run by mistake on the new Mac after migration) and points to `mtm verify`. `verify` fails when run on the Mac that ran `prepare`. `cleanup` needs a SAFE TO WIPE result from a full `verify` (not one limited with `--only`) on the same Mac, or `--force`.
 - **Version mismatch.** `mtm` refuses to read a manifest with a newer, unknown schema major version, and warns when the `mtm` version differs from the one that ran `prepare`.
 - **Missing tools.** If Docker Desktop or a database is installed but stopped, `mtm` asks the user to start it, or starts it temporarily and stops it again afterward.
 - **No silent failures.** Every error from a system command is logged with stderr (redacted) and surfaced in the report.
