@@ -109,3 +109,54 @@ func TestSafeBannerNamesCheckedModules(t *testing.T) {
 		t.Errorf("safe banner should list files, git once each and skip preflight:\n%s", out.String())
 	}
 }
+
+func assertNoRawControls(t *testing.T, s string) {
+	t.Helper()
+	for _, c := range []string{"\x1b", "\r", "\u202e"} {
+		if strings.Contains(s, c) {
+			t.Errorf("output contains raw %q:\n%q", c, s)
+		}
+	}
+}
+
+func TestVerifyEscapesControlCharacters(t *testing.T) {
+	checks := []module.Check{{
+		Module: "files", ID: "files:x", Status: module.StatusFail, Critical: true,
+		Title: "Docs\x1b[2J", Detail: "1 missing\rSAFE TO WIPE",
+		Paths: []string{"Docs/Icon\r", "Docs/evil\x1b[2Jname", "Docs/rtl\u202etxt.exe"},
+	}}
+	var out bytes.Buffer
+	Verify(&out, checks, verdict.Decide(checks, nil), true)
+	s := out.String()
+	assertNoRawControls(t, s)
+	for _, want := range []string{`Docs\x1b[2J`, `1 missing\rSAFE TO WIPE`, `"Docs/Icon\r"`, `"Docs/evil\x1b[2Jname"`, `"Docs/rtl\u202etxt.exe"`, `files Docs\x1b[2J: 1 missing\rSAFE TO WIPE`} {
+		if !strings.Contains(s, want) {
+			t.Errorf("output missing %s:\n%s", want, s)
+		}
+	}
+}
+
+func TestFindingsAndPrepareEscapeControlCharacters(t *testing.T) {
+	findings := []module.Finding{{Module: "git", ID: "x", Severity: module.SeverityBlocker, Handler: module.Manual,
+		Title: "~/GitHub/Icon\r", Detail: "bad\x1b[2J", Fix: "run\x1b]0;title\x07"}}
+	var scan bytes.Buffer
+	Findings(&scan, findings)
+	assertNoRawControls(t, scan.String())
+	if !strings.Contains(scan.String(), `~/GitHub/Icon\r`) || strings.Contains(scan.String(), "\x07") {
+		t.Errorf("scan output:\n%q", scan.String())
+	}
+	var prep bytes.Buffer
+	Prepare(&prep, false, []string{"files: recorded Icon\r"}, findings)
+	assertNoRawControls(t, prep.String())
+}
+
+func TestJSONKeepsControlCharactersEscapedAndValid(t *testing.T) {
+	var out bytes.Buffer
+	if err := JSON(&out, map[string]string{"path": "Docs/Icon\r", "title": "x\x1b[2J"}); err != nil {
+		t.Fatal(err)
+	}
+	if !json.Valid(out.Bytes()) {
+		t.Fatalf("not valid JSON:\n%s", out.String())
+	}
+	assertNoRawControls(t, out.String())
+}

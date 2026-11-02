@@ -1,6 +1,7 @@
 // Package report renders mtm's results for people and for scripts. Every
-// string passes through clean, so fingerprints and credentials never reach
-// the terminal or a pasted bug report.
+// string passes through clean (or scrub, for JSON), so fingerprints and
+// credentials never reach the terminal or a pasted bug report, and control
+// characters in file names never reach the terminal raw.
 package report
 
 import (
@@ -11,6 +12,7 @@ import (
 	"slices"
 	"strconv"
 	"strings"
+	"unicode/utf8"
 
 	"github.com/momentmaker/mtm/internal/module"
 	"github.com/momentmaker/mtm/internal/preflight"
@@ -22,16 +24,50 @@ const shownPaths = 5
 
 var fingerprintPattern = regexp.MustCompile(`sha256:[0-9a-f]+`)
 
-func clean(s string) string {
+// scrub masks fingerprints and credentials. JSON output uses it alone,
+// because the encoder already escapes control characters.
+func scrub(s string) string {
 	return redact.Text(fingerprintPattern.ReplaceAllString(s, "[fingerprint]"))
 }
 
+// clean is scrub for terminal text. It also escapes every non-printing
+// rune, so a name such as "Icon\r" or one holding an escape sequence can't
+// move the cursor, clear the screen, or overwrite a line with a fake
+// SAFE TO WIPE.
+func clean(s string) string {
+	s = scrub(s)
+	if !needsEscape(s) {
+		return s
+	}
+	var b strings.Builder
+	for i := 0; i < len(s); {
+		r, size := utf8.DecodeRuneInString(s[i:])
+		switch {
+		case r == utf8.RuneError && size == 1:
+			fmt.Fprintf(&b, `\x%02x`, s[i])
+		case strconv.IsPrint(r):
+			b.WriteRune(r)
+		default:
+			q := strconv.QuoteRune(r)
+			b.WriteString(q[1 : len(q)-1])
+		}
+		i += size
+	}
+	return b.String()
+}
+
+// cleanPath quotes a path that needs escaping, so the escapes can't be
+// mistaken for part of an ordinary name.
 func cleanPath(p string) string {
-	p = clean(p)
-	if strings.ContainsAny(p, "\n\r\t") {
+	p = scrub(p)
+	if needsEscape(p) {
 		return strconv.Quote(p)
 	}
 	return p
+}
+
+func needsEscape(s string) bool {
+	return !utf8.ValidString(s) || strings.ContainsFunc(s, func(r rune) bool { return !strconv.IsPrint(r) })
 }
 
 func severitySymbol(s module.Severity) string {
@@ -141,7 +177,7 @@ func Verify(w io.Writer, checks []module.Check, v verdict.Verdict, details bool)
 			if lastModule != "" {
 				fmt.Fprintln(w)
 			}
-			fmt.Fprintln(w, c.Module)
+			fmt.Fprintln(w, clean(c.Module))
 			lastModule = c.Module
 		}
 		writeCheck(w, c, details)
@@ -158,7 +194,7 @@ func Verify(w io.Writer, checks []module.Check, v verdict.Verdict, details bool)
 		if reason == "" {
 			reason = string(c.Status)
 		}
-		fmt.Fprintf(w, "  ✗ %s %s: %s\n", c.Module, clean(c.Title), clean(reason))
+		fmt.Fprintf(w, "  ✗ %s %s: %s\n", clean(c.Module), clean(c.Title), clean(reason))
 	}
 	for _, item := range v.Pending {
 		fmt.Fprintf(w, "  ✗ checklist: %s\n", clean(item))
@@ -204,6 +240,6 @@ func JSON(w io.Writer, v any) error {
 	if err != nil {
 		return fmt.Errorf("encode JSON: %w", err)
 	}
-	_, err = fmt.Fprintln(w, clean(string(data)))
+	_, err = fmt.Fprintln(w, scrub(string(data)))
 	return err
 }
