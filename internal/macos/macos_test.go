@@ -65,6 +65,9 @@ func TestShellQuote(t *testing.T) {
 		"/Users/dev/.mtm":       "'/Users/dev/.mtm'",
 		"/Users/my home/.mtm":   "'/Users/my home/.mtm'",
 		"/Users/o'brien/.mtm/x": `'/Users/o'\''brien/.mtm/x'`,
+		`/tmp/a\b`:              `'/tmp/a'\\'b'`,
+		`/tmp/a\`:               `'/tmp/a'\\''`,
+		`/tmp/a\'b`:             `'/tmp/a'\\''\''b'`,
 	}
 	for in, want := range tests {
 		if got := ShellQuote(in); got != want {

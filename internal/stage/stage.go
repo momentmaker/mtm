@@ -11,6 +11,7 @@ import (
 	"path/filepath"
 	"syscall"
 
+	"github.com/momentmaker/mtm/internal/macos"
 	"github.com/momentmaker/mtm/internal/runner"
 )
 
@@ -63,12 +64,18 @@ func checkSafe(root string) error {
 		return fmt.Errorf("inspect %s: no owner information", root)
 	}
 	if int(st.Uid) != os.Getuid() {
-		return fmt.Errorf("%s is owned by uid %d, not you (uid %d). If Migration Assistant gave your account a new uid, run: sudo chown -R $(id -un) %s", root, st.Uid, os.Getuid(), root)
+		return wrongOwner(root, st.Uid)
 	}
 	if perm := info.Mode().Perm(); perm&0o077 != 0 {
-		return fmt.Errorf("%s has permissions %04o but must be private. Fix with: chmod 700 %s", root, perm, root)
+		return fmt.Errorf("%s has permissions %04o but must be private. Fix with: chmod 700 %s", root, perm, macos.ShellQuote(root))
 	}
 	return nil
+}
+
+// wrongOwner explains a stage folder another uid owns, as happens when
+// Migration Assistant gives the account a new uid on the new Mac.
+func wrongOwner(root string, uid uint32) error {
+	return fmt.Errorf("%s is owned by uid %d, not you (uid %d). If Migration Assistant gave your account a new uid, run: sudo chown -R $(id -un) %s", root, uid, os.Getuid(), macos.ShellQuote(root))
 }
 
 func (s *Stage) Path(elem ...string) string {

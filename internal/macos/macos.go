@@ -52,7 +52,12 @@ func Archs(ctx context.Context, r runner.Runner, exe string) []string {
 	return strings.Fields(string(out.Stdout))
 }
 
-// ShellQuote makes s safe to paste into a shell as one word.
+// quoteEscapes moves backslashes out of the single quotes as well as
+// apostrophes: fish reads \\ and \' inside single quotes as escapes, so a
+// path ending in a backslash would otherwise end the quoting early there.
+var quoteEscapes = strings.NewReplacer(`\`, `'\\'`, `'`, `'\''`)
+
+// ShellQuote makes s safe to paste as one word into sh, zsh, bash, or fish.
 func ShellQuote(s string) string {
-	return "'" + strings.ReplaceAll(s, "'", `'\''`) + "'"
+	return "'" + quoteEscapes.Replace(s) + "'"
 }

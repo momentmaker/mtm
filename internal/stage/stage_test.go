@@ -8,6 +8,7 @@ import (
 	"strings"
 	"testing"
 
+	"github.com/momentmaker/mtm/internal/macos"
 	"github.com/momentmaker/mtm/internal/runner"
 )
 
@@ -50,6 +51,29 @@ func TestOpenRefusesLoosePermissions(t *testing.T) {
 	_, err := Open(home)
 	if err == nil || !strings.Contains(err.Error(), "chmod 700") {
 		t.Errorf("err = %v, want a refusal that suggests chmod 700", err)
+	}
+}
+
+func TestOpenQuotesThePathInItsChmodFix(t *testing.T) {
+	home := filepath.Join(t.TempDir(), "o'brien")
+	root := filepath.Join(home, DirName)
+	if err := os.MkdirAll(root, 0o700); err != nil {
+		t.Fatal(err)
+	}
+	if err := os.Chmod(root, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	_, err := Open(home)
+	if want := "chmod 700 " + macos.ShellQuote(root); err == nil || !strings.HasSuffix(err.Error(), want) {
+		t.Errorf("err = %v, want it to end with %q", err, want)
+	}
+}
+
+func TestWrongOwnerQuotesThePathInItsChownFix(t *testing.T) {
+	root := "/Users/o'brien/.mtm"
+	err := wrongOwner(root, 502)
+	if want := "sudo chown -R $(id -un) " + macos.ShellQuote(root); !strings.HasSuffix(err.Error(), want) {
+		t.Errorf("err = %v, want it to end with %q", err, want)
 	}
 }
 
