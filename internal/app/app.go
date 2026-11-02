@@ -123,6 +123,9 @@ func (a *App) Prepare(ctx context.Context, opts PrepareOptions) (PrepareReport, 
 	for _, mod := range mods {
 		res, err := mod.Prepare(env, st)
 		if err != nil {
+			// An earlier record describes an older state of this Mac and must
+			// not vouch for the current one, so verify reports it not prepared.
+			delete(m.Modules, mod.Name())
 			rep.Problems = append(rep.Problems, moduleFailure(mod.Name(), "prepare", err))
 			continue
 		}

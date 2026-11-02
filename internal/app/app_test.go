@@ -353,3 +353,24 @@ func TestDocumentsUnreadableAtPrepareThenMissingIsNotSafe(t *testing.T) {
 		t.Errorf("safe = %v, blocking = %v; want files:Documents blocking", got.Verdict.Safe, blockingIDs(got))
 	}
 }
+
+func TestFailedPrepareRerunDropsTheStaleRecord(t *testing.T) {
+	old := seedHome(t)
+	prepareOld(t, old)
+	testutil.WriteFile(t, filepath.Join(old, "NewProject/only-here.txt"), "precious\n")
+	cancelled, cancel := context.WithCancel(ctx)
+	cancel()
+	rep, err := newTestApp(old, fakeMac(old, oldUUID)).Prepare(cancelled, PrepareOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rep.Ready {
+		t.Fatal("cancelled prepare reported READY")
+	}
+	newHome := migrate(t, old)
+	os.RemoveAll(filepath.Join(newHome, "NewProject"))
+	got := verifyOn(t, newHome, newUUID, VerifyOptions{})
+	if got.Verdict.Safe || !slices.Contains(blockingIDs(got), "files:not-prepared") {
+		t.Errorf("safe = %v, blocking = %v; want files:not-prepared blocking", got.Verdict.Safe, blockingIDs(got))
+	}
+}
