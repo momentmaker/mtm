@@ -8,6 +8,7 @@ import (
 	"os"
 	"path"
 	"path/filepath"
+	"syscall"
 
 	"github.com/momentmaker/mtm/internal/fsinfo"
 	"github.com/momentmaker/mtm/internal/pathset"
@@ -53,13 +54,8 @@ func visitEntries(ctx context.Context, home, rel string, entries []fs.DirEntry, 
 func visit(ctx context.Context, home, rel string, skip pathset.Set, emit func(item) error) error {
 	abs := filepath.Join(home, filepath.FromSlash(rel))
 	info, err := os.Lstat(abs)
-	switch {
-	case errors.Is(err, fs.ErrNotExist):
-		return nil
-	case errors.Is(err, fs.ErrPermission):
-		return emit(item{rel: rel, abs: abs, unreadable: true})
-	case err != nil:
-		return fmt.Errorf("inspect %s: %w", abs, err)
+	if err != nil {
+		return skipOrUnreadable(err, rel, abs, emit)
 	}
 	it := item{rel: rel, abs: abs, info: info}
 	switch mode := info.Mode(); {
@@ -68,18 +64,13 @@ func visit(ctx context.Context, home, rel string, skip pathset.Set, emit func(it
 		return emit(it)
 	case mode&fs.ModeSymlink != 0:
 		if it.target, err = os.Readlink(abs); err != nil {
-			return fmt.Errorf("read link %s: %w", abs, err)
+			return skipOrUnreadable(err, rel, abs, emit)
 		}
 		return emit(it)
 	case mode.IsDir():
 		entries, err := os.ReadDir(abs)
-		switch {
-		case errors.Is(err, fs.ErrPermission):
-			return emit(item{rel: rel, abs: abs, unreadable: true})
-		case errors.Is(err, fs.ErrNotExist):
-			return nil
-		case err != nil:
-			return fmt.Errorf("read %s: %w", abs, err)
+		if err != nil {
+			return skipOrUnreadable(err, rel, abs, emit)
 		}
 		if err := emit(it); err != nil {
 			return err
@@ -89,4 +80,14 @@ func visit(ctx context.Context, home, rel string, skip pathset.Set, emit func(it
 		return emit(it)
 	}
 	return nil
+}
+
+// skipOrUnreadable keeps one bad item from aborting the walk. An item that
+// vanished mid-walk is dropped; any other failure (permissions, a stale
+// mount, an I/O error) is recorded as unreadable.
+func skipOrUnreadable(err error, rel, abs string, emit func(item) error) error {
+	if errors.Is(err, fs.ErrNotExist) || errors.Is(err, syscall.ENOTDIR) {
+		return nil
+	}
+	return emit(item{rel: rel, abs: abs, unreadable: true})
 }
