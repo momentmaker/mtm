@@ -124,6 +124,26 @@ func TestVersionFallsBackToStderr(t *testing.T) {
 	}
 }
 
+// brew --version is one of these commands, and it must not update
+// Homebrew or send analytics on mtm's behalf.
+func TestVersionCommandsKeepHomebrewQuiet(t *testing.T) {
+	f := newFixture(t, "/opt/homebrew/bin/fish")
+	if _, err := (Module{User: "dev"}).collect(f.env(nil)); err != nil {
+		t.Fatal(err)
+	}
+	node := filepath.Join(f.bin1, "node")
+	i := slices.IndexFunc(f.fake.Calls(), func(c runner.Command) bool { return c.Name == node })
+	if i < 0 {
+		t.Fatal("node --version did not run")
+	}
+	env := f.fake.Calls()[i].Env
+	for _, want := range []string{"PATH=" + f.bin1 + ":" + f.bin2, "HOMEBREW_NO_AUTO_UPDATE=1", "HOMEBREW_NO_ANALYTICS=1", "HOMEBREW_NO_ENV_HINTS=1", "HOMEBREW_NO_INSTALL_CLEANUP=1"} {
+		if !slices.Contains(env, want) {
+			t.Errorf("env = %q, want it to contain %q", env, want)
+		}
+	}
+}
+
 func TestVerify(t *testing.T) {
 	old := Inventory{Shell: "/opt/homebrew/bin/fish", Tools: []Tool{
 		{Name: "node", Path: "~/.asdf/shims/node", Version: "v22.1.0"},

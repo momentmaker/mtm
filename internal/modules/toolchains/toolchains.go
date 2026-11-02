@@ -49,6 +49,11 @@ var known = []tool{
 	{"mise", []string{"--version"}},
 }
 
+// quietHomebrew goes to every version command. brew --version is one of
+// them, and like every brew command mtm runs it must not update Homebrew
+// or send analytics; other tools ignore these variables.
+var quietHomebrew = []string{"HOMEBREW_NO_AUTO_UPDATE=1", "HOMEBREW_NO_ANALYTICS=1", "HOMEBREW_NO_ENV_HINTS=1", "HOMEBREW_NO_INSTALL_CLEANUP=1"}
+
 type Module struct {
 	User string
 }
@@ -149,7 +154,7 @@ func lookPath(name, path string) string {
 func version(env module.Env, abs string, args []string, path string) string {
 	ctx, cancel := context.WithTimeout(env.Ctx, versionTimeout)
 	defer cancel()
-	out, err := env.Run.Run(ctx, runner.Command{Name: abs, Args: args, Dir: env.Home, Env: []string{"PATH=" + path}})
+	out, err := env.Run.Run(ctx, runner.Command{Name: abs, Args: args, Dir: env.Home, Env: append([]string{"PATH=" + path}, quietHomebrew...)})
 	if err != nil {
 		return "unknown"
 	}
