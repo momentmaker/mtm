@@ -301,6 +301,37 @@ func TestPrepareWarnsAboutLinksOutsideHome(t *testing.T) {
 	}
 }
 
+func TestVerifyFailsWhenRecordIsShorterThanInventory(t *testing.T) {
+	home := seedHome(t)
+	m := prepareHome(t, home)
+	var stats Stats
+	preparedAt, err := m.Module(Name, &stats)
+	if err != nil {
+		t.Fatal(err)
+	}
+	recorded := stats.Entries
+	stats.Entries += 5
+	if err := m.SetModule(Name, preparedAt, stats); err != nil {
+		t.Fatal(err)
+	}
+	st, err := stage.Existing(home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	checks, err := New().Verify(module.Env{Ctx: context.Background(), Home: home, Manifest: m}, st)
+	if err != nil {
+		t.Fatal(err)
+	}
+	i := slices.IndexFunc(checks, func(c module.Check) bool { return c.ID == "files:record" })
+	if i < 0 {
+		t.Fatalf("checks = %+v, want files:record", checks)
+	}
+	want := fmt.Sprintf("read %d of %d entries", recorded, recorded+5)
+	if c := checks[i]; c.Status != module.StatusFail || !c.Critical || c.Title != "the file record is incomplete" || !strings.Contains(c.Detail, want) {
+		t.Errorf("check = %+v, want a critical fail: %s", c, want)
+	}
+}
+
 func TestVerifyWorksAfterCopyToDifferentHome(t *testing.T) {
 	home := seedHome(t)
 	m := prepareHome(t, home)

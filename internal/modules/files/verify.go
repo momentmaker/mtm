@@ -38,6 +38,7 @@ func (Module) Verify(env module.Env, st *stage.Stage) ([]module.Check, error) {
 	}
 	prepared := preparedAt.UnixNano()
 	t := newTally()
+	read := 0
 	for {
 		if err := env.Ctx.Err(); err != nil {
 			return nil, err
@@ -49,13 +50,31 @@ func (Module) Verify(env module.Env, st *stage.Stage) ([]module.Check, error) {
 		if err != nil {
 			return nil, err
 		}
+		read++
 		obs, err := observe(env.Home, rec, prepared)
 		if err != nil {
 			return nil, err
 		}
 		t.add(rec, Classify(rec, obs, prepared, volatile.Match))
 	}
-	return t.checks(), nil
+	checks := t.checks()
+	if read != stats.Entries {
+		checks = append(checks, incompleteRecord(read, stats.Entries))
+	}
+	return checks, nil
+}
+
+// incompleteRecord fails a record that doesn't hold every entry prepare
+// counted. A short record would otherwise pass with fewer checks.
+func incompleteRecord(read, recorded int) module.Check {
+	return module.Check{
+		Module:   Name,
+		ID:       Name + ":record",
+		Status:   module.StatusFail,
+		Critical: true,
+		Title:    "the file record is incomplete",
+		Detail:   fmt.Sprintf("read %d of %d entries; run mtm prepare on the old Mac again", read, recorded),
+	}
 }
 
 // observe looks at a recorded path on the new Mac. Only files, folders, and
