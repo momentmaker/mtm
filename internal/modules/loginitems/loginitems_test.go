@@ -8,6 +8,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/momentmaker/mtm/internal/checklist"
 	"github.com/momentmaker/mtm/internal/manifest"
 	"github.com/momentmaker/mtm/internal/module"
 	"github.com/momentmaker/mtm/internal/runner"
@@ -27,7 +28,8 @@ type fixture struct {
 func newFixture(t *testing.T) fixture {
 	t.Helper()
 	f := fixture{home: filepath.Join(t.TempDir(), "my home"), fake: &runner.Fake{Responses: map[string]runner.Response{
-		"/bin/launchctl list": {Stdout: launchctlList},
+		"/bin/launchctl list":              {Stdout: launchctlList},
+		"/usr/bin/sw_vers -productVersion": {Stdout: "26.7.1\n"},
 	}}}
 	dir := filepath.Join(f.home, "Library", "LaunchAgents")
 	for file, label := range map[string]string{"a.plist": "com.a", "b.plist": "com.b"} {
@@ -104,8 +106,13 @@ func TestFinishLoadsAgentsAndListsLoginItems(t *testing.T) {
 	if !slices.Equal(res.Done, []string{"loaded com.a"}) {
 		t.Errorf("done = %q", res.Done)
 	}
-	if len(res.Problems) != 1 || !strings.Contains(res.Problems[0].Detail, "Raycast") {
-		t.Errorf("problems = %+v", res.Problems)
+	if len(res.Problems) != 0 {
+		t.Errorf("problems = %+v, want login items as checklist steps instead", res.Problems)
+	}
+	want := []checklist.Item{{ID: "loginitems:Raycast", Module: Name, Title: "Add Raycast to Login Items again",
+		Where: "System Settings > General > Login Items & Extensions", Link: "x-apple.systempreferences:com.apple.LoginItems-Settings.extension"}}
+	if !slices.Equal(res.Checklist, want) {
+		t.Errorf("checklist = %+v, want %+v", res.Checklist, want)
 	}
 }
 
@@ -127,8 +134,8 @@ func TestFinishBootstrapFailureIsByHand(t *testing.T) {
 func TestFinishWhenLoginItemsWereNotListed(t *testing.T) {
 	f := newFixture(t)
 	res, err := New(uid).Finish(f.env(record(t, Inventory{})), nil)
-	if err != nil || len(res.Problems) != 1 || !strings.Contains(res.Problems[0].Detail, "couldn't list them") {
-		t.Errorf("Finish = %+v, %v", res, err)
+	if err != nil || len(res.Checklist) != 1 || res.Checklist[0].ID != "loginitems:from-old-mac" {
+		t.Errorf("Finish = %+v, %v; want one step to note the login items on the old Mac", res, err)
 	}
 }
 

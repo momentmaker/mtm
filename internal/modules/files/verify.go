@@ -21,7 +21,7 @@ const (
 	maxPathsPerGroup = 200
 )
 
-func (Module) Verify(env module.Env, st *stage.Stage) ([]module.Check, error) {
+func (m Module) Verify(env module.Env, st *stage.Stage) ([]module.Check, error) {
 	var stats Stats
 	preparedAt, err := module.LoadInventory(env, Name, &stats)
 	if err != nil {
@@ -55,7 +55,7 @@ func (Module) Verify(env module.Env, st *stage.Stage) ([]module.Check, error) {
 		if err != nil {
 			return nil, err
 		}
-		t.add(rec, Classify(rec, obs, prepared, volatile.Match))
+		t.add(rec, Classify(rec, obs, prepared, m.isVolatile))
 	}
 	checks := t.checks()
 	if read != stats.Entries {

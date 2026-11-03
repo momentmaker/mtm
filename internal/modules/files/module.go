@@ -8,6 +8,7 @@ import (
 
 	"github.com/momentmaker/mtm/internal/manifest"
 	"github.com/momentmaker/mtm/internal/module"
+	"github.com/momentmaker/mtm/internal/pathset"
 	"github.com/momentmaker/mtm/internal/stage"
 )
 
@@ -16,9 +17,20 @@ const (
 	maxListed = 20
 )
 
-type Module struct{}
+// Module records and checks the home folder. extraVolatile holds the
+// catalog's paths that apps create and delete on their own, on top of the
+// built-in volatile list.
+type Module struct {
+	extraVolatile pathset.Set
+}
 
-func New() Module { return Module{} }
+// New takes the catalog's volatile patterns, which its tests check, so
+// they always compile.
+func New(volatile ...string) Module { return Module{extraVolatile: pathset.MustNew(volatile...)} }
+
+func (m Module) isVolatile(rel string) bool {
+	return volatile.Match(rel) || m.extraVolatile.Match(rel)
+}
 
 func (Module) Name() string { return Name }
 

@@ -14,6 +14,7 @@ import (
 	"time"
 
 	"github.com/momentmaker/mtm/internal/app"
+	"github.com/momentmaker/mtm/internal/catalog"
 	"github.com/momentmaker/mtm/internal/module"
 	"github.com/momentmaker/mtm/internal/modules/databases"
 	"github.com/momentmaker/mtm/internal/modules/docker"
@@ -76,16 +77,28 @@ func main() {
 // running, and homebrew's prepare stops it.
 func defaultApp(home string) *app.App {
 	name := currentUser()
+	cat := builtinCatalog()
 	return &app.App{
 		Runner:  runner.Exec{},
 		Home:    home,
 		Version: version,
 		Now:     time.Now,
 		Modules: []module.Module{
-			files.New(), git.New(), system.New(name), databases.New(), docker.New(),
+			files.New(cat.Volatile()...), git.New(), system.New(name, cat), databases.New(), docker.New(),
 			homebrew.New(name), toolchains.New(name), loginitems.New(os.Getuid()),
 		},
 	}
+}
+
+// builtinCatalog loads the app catalog built into mtm. internal/catalog's
+// tests check every file in it, so a failure here is a broken build, not
+// something a user can fix.
+func builtinCatalog() *catalog.Catalog {
+	c, err := catalog.Default()
+	if err != nil {
+		panic("mtm's built-in app catalog is invalid: " + err.Error())
+	}
+	return c
 }
 
 // currentUser is the account name Directory Services knows the user by.

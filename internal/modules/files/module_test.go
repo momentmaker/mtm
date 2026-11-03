@@ -391,3 +391,35 @@ func TestScanWithReadableHomeHasNoAccessWarning(t *testing.T) {
 		t.Errorf("findings = %+v, want only the home info finding", findings)
 	}
 }
+
+func TestCatalogVolatilePathsMissingAfterMigrationAreInfo(t *testing.T) {
+	home := seedHome(t)
+	testutil.WriteFile(t, filepath.Join(home, "Library/Application Support/Code/logs/main.log"), "log\n")
+	m := prepareHome(t, home)
+	if err := os.Remove(filepath.Join(home, "Library/Application Support/Code/logs/main.log")); err != nil {
+		t.Fatal(err)
+	}
+	st, err := stage.Existing(home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	group := func(mod Module) module.Check {
+		checks, err := mod.Verify(module.Env{Ctx: context.Background(), Home: home, Manifest: m}, st)
+		if err != nil {
+			t.Fatal(err)
+		}
+		for _, c := range checks {
+			if c.Title == "Library/Application Support" {
+				return c
+			}
+		}
+		t.Fatalf("no Library/Application Support check in %+v", checks)
+		return module.Check{}
+	}
+	if c := group(New()); c.Status != module.StatusWarn {
+		t.Errorf("without the catalog pattern: %+v, want warn", c)
+	}
+	if c := group(New("~/Library/Application Support/Code/logs/")); c.Status != module.StatusPass {
+		t.Errorf("with the catalog pattern: %+v, want pass", c)
+	}
+}

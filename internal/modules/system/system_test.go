@@ -8,9 +8,12 @@ import (
 	"slices"
 	"strings"
 	"testing"
+	"testing/fstest"
 	"time"
 
 	"github.com/momentmaker/mtm/internal/apps"
+	"github.com/momentmaker/mtm/internal/catalog"
+	"github.com/momentmaker/mtm/internal/checklist"
 	"github.com/momentmaker/mtm/internal/macos"
 	"github.com/momentmaker/mtm/internal/manifest"
 	"github.com/momentmaker/mtm/internal/module"
@@ -318,5 +321,32 @@ func TestVerifyAndFinishTreatAnUnreadableRecordedEtcFileAsDiffering(t *testing.T
 	}
 	if want := "sudo install -m 0644 -o root -g wheel " + macos.ShellQuote(st.Path("exports", "etc", "hosts")) + " '/etc/hosts'"; !strings.Contains(fixesByID(res)["etc:hosts"], want) {
 		t.Errorf("hosts fix = %q, want it to contain %q", fixesByID(res)["etc:hosts"], want)
+	}
+}
+
+func TestFinishListsTheCatalogsStepsForRecordedApps(t *testing.T) {
+	f := newFixture(t)
+	f.addApp(t, "Dash.app", "com.kapeli.dashdoc", "7.3", "Dash", "arm64")
+	f.addApp(t, "Signal.app", "org.whispersystems.signal-desktop", "7.80", "Signal", "arm64")
+	m, st, _ := f.prepare(t)
+	c, err := catalog.Load(fstest.MapFS{
+		"dash.toml":   {Data: []byte("id = \"dash\"\nname = \"Dash\"\nbundle_id = \"com.kapeli.dashdoc\"\n\n[license]\nreactivate = true\nnote = \"Enter your license.\"\n")},
+		"signal.toml": {Data: []byte("id = \"signal\"\nname = \"Signal\"\nbundle_id = \"org.whispersystems.signal-desktop\"\nnotes = [\"Link it again.\"]\n")},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	mod := f.module()
+	mod.Catalog = c
+	res, err := mod.Finish(f.env(m), st)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []checklist.Item{
+		{ID: "system:license:dash", Module: Name, Title: "Reactivate the Dash license", Detail: "Enter your license.", Where: "Dash"},
+		{ID: "system:note:signal:1", Module: Name, Title: "Signal: Link it again.", Where: "Signal"},
+	}
+	if !slices.Equal(res.Checklist, want) {
+		t.Errorf("checklist = %+v\nwant %+v", res.Checklist, want)
 	}
 }

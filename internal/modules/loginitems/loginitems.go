@@ -11,6 +11,8 @@ import (
 	"strconv"
 	"strings"
 
+	"github.com/momentmaker/mtm/internal/catalog"
+	"github.com/momentmaker/mtm/internal/checklist"
 	"github.com/momentmaker/mtm/internal/macos"
 	"github.com/momentmaker/mtm/internal/module"
 	"github.com/momentmaker/mtm/internal/runner"
@@ -20,6 +22,7 @@ import (
 
 const (
 	Name             = "loginitems"
+	loginItemsPane   = "System Settings > General > Login Items & Extensions"
 	loginItemsScript = `tell application "System Events" to get the name of every login item`
 )
 
@@ -187,21 +190,33 @@ func (m Module) Finish(env module.Env, _ *stage.Stage) (module.Result, error) {
 	if len(ok) > 0 {
 		res.Done = append(res.Done, "loaded "+strings.Join(ok, ", "))
 	}
-	switch {
-	case !old.LoginItemsListed:
-		res.Problems = append(res.Problems, addBack("mtm couldn't list them on the old Mac; check the list there before you erase it."))
-	case len(old.LoginItems) > 0:
-		res.Problems = append(res.Problems, addBack("Add: "+strings.Join(old.LoginItems, ", ")))
+	items, err := loginItemSteps(env, old)
+	if err != nil {
+		return module.Result{}, err
 	}
+	res.Checklist = items
 	return res, nil
 }
 
-func addBack(detail string) module.Finding {
-	return module.Finding{
-		Module: Name, ID: "login-items", Severity: module.SeverityWarn, Handler: module.Manual,
-		Title: "Add your login items back", Detail: detail,
-		Fix: "System Settings > General > Login Items > Open at Login",
+// loginItemSteps asks the user to add each login item back: macOS keeps
+// the list outside the files Migration Assistant copies. When prepare
+// couldn't read the list, the step is to read it on the old Mac first.
+func loginItemSteps(env module.Env, old Inventory) ([]checklist.Item, error) {
+	major, err := macos.MajorVersion(env.Ctx, env.Run)
+	if err != nil {
+		return nil, err
 	}
+	step := func(id, title string) checklist.Item {
+		return checklist.Item{ID: Name + ":" + id, Module: Name, Title: title, Where: loginItemsPane, Link: catalog.LoginItemsLink(major)}
+	}
+	if !old.LoginItemsListed {
+		return []checklist.Item{step("from-old-mac", "Note your login items on the old Mac and add them here")}, nil
+	}
+	var items []checklist.Item
+	for _, name := range old.LoginItems {
+		items = append(items, step(name, "Add "+name+" to Login Items again"))
+	}
+	return items, nil
 }
 
 func (Module) Verify(env module.Env, _ *stage.Stage) ([]module.Check, error) {

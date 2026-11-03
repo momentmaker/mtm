@@ -15,6 +15,8 @@ import (
 	"strings"
 
 	"github.com/momentmaker/mtm/internal/apps"
+	"github.com/momentmaker/mtm/internal/catalog"
+	"github.com/momentmaker/mtm/internal/checklist"
 	"github.com/momentmaker/mtm/internal/fsinfo"
 	"github.com/momentmaker/mtm/internal/macos"
 	"github.com/momentmaker/mtm/internal/module"
@@ -31,15 +33,18 @@ const (
 // /etc/paths.d is added when recording.
 var etcFiles = []string{"hosts", "shells", "pam.d/sudo_local"}
 
+// Module records the login shell, /etc files, and apps. Catalog supplies
+// the by-hand steps finish lists for the apps.
 type Module struct {
 	User        string
 	EtcDir      string
 	AppRoots    func(home string) []apps.Root
 	RosettaPath string
+	Catalog     *catalog.Catalog
 }
 
-func New(user string) Module {
-	return Module{User: user, EtcDir: "/etc", AppRoots: DefaultAppRoots, RosettaPath: macos.RosettaPath}
+func New(user string, c *catalog.Catalog) Module {
+	return Module{User: user, EtcDir: "/etc", AppRoots: DefaultAppRoots, RosettaPath: macos.RosettaPath, Catalog: c}
 }
 
 func DefaultAppRoots(home string) []apps.Root {
@@ -220,7 +225,32 @@ func (m Module) Finish(env module.Env, st *stage.Stage) (module.Result, error) {
 	if len(res.Problems) == 0 {
 		res.Done = []string{"login shell, /etc files, and Rosetta are as they were"}
 	}
+	res.Checklist = m.appSteps(old.Apps)
 	return res, nil
+}
+
+// appSteps are what the catalog says the old Mac's apps need by hand on a
+// new Mac: a license to enter again, and notes such as signing in again.
+func (m Module) appSteps(installed []apps.App) []checklist.Item {
+	if m.Catalog == nil {
+		return nil
+	}
+	var items []checklist.Item
+	for _, a := range installed {
+		entry, ok := m.Catalog.ByBundleID(a.BundleID)
+		if !ok {
+			continue
+		}
+		if entry.License.Reactivate {
+			items = append(items, checklist.Item{ID: Name + ":license:" + entry.ID, Module: Name,
+				Title: "Reactivate the " + entry.Name + " license", Detail: entry.License.Note, Where: entry.Name})
+		}
+		for i, note := range entry.Notes {
+			items = append(items, checklist.Item{ID: fmt.Sprintf("%s:note:%s:%d", Name, entry.ID, i+1), Module: Name,
+				Title: entry.Name + ": " + note, Where: entry.Name})
+		}
+	}
+	return items
 }
 
 // restoreEtc copies an exported /etc file back as root-owned and readable
