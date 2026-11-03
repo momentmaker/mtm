@@ -9,6 +9,7 @@ import (
 	"os"
 	"time"
 
+	"github.com/momentmaker/mtm/internal/checklist"
 	"github.com/momentmaker/mtm/internal/stage"
 )
 
@@ -19,8 +20,11 @@ type VerifyResult struct {
 	Safe bool      `json:"safe"`
 }
 
+// State holds the new Mac's checklist, with what the user did with each
+// step, and the last verify result.
 type State struct {
-	LastVerify *VerifyResult `json:"last_verify,omitempty"`
+	LastVerify *VerifyResult  `json:"last_verify,omitempty"`
+	Checklist  checklist.List `json:"checklist,omitzero"`
 }
 
 func Load(st *stage.Stage) (State, error) {

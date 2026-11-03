@@ -4,6 +4,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/momentmaker/mtm/internal/checklist"
 	"github.com/momentmaker/mtm/internal/stage"
 )
 
@@ -24,5 +25,23 @@ func TestSaveLoadRoundTrip(t *testing.T) {
 	s, err := Load(st)
 	if err != nil || s.LastVerify == nil || !s.LastVerify.Safe || !s.LastVerify.At.Equal(at) {
 		t.Errorf("Load = %+v, %v", s, err)
+	}
+}
+
+func TestSaveLoadKeepsTheChecklist(t *testing.T) {
+	st, _ := stage.Open(t.TempDir())
+	var s State
+	s.Checklist.Add(checklist.Item{ID: "system:license:dash", Module: "system", Title: "Reactivate Dash"})
+	s.Checklist.Skip("system:license:dash", "no longer use it", time.Date(2026, 11, 3, 0, 0, 0, 0, time.UTC))
+	if err := Save(st, s); err != nil {
+		t.Fatal(err)
+	}
+	got, err := Load(st)
+	if err != nil {
+		t.Fatal(err)
+	}
+	e, ok := got.Checklist.Find("system:license:dash")
+	if !ok || e.Status != checklist.Skipped || e.Reason != "no longer use it" {
+		t.Errorf("entry = %+v, %v", e, ok)
 	}
 }
