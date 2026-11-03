@@ -86,7 +86,7 @@ func chromiumExtensions(dir string) ([]string, error) {
 
 // firefoxProfiles reads profiles.ini. Each [Profile<n>] section has the
 // profile's Name and Path, which is relative to the Firefox folder when
-// IsRelative=1.
+// IsRelative=1 and absolute otherwise.
 func firefoxProfiles(root string) ([]Profile, error) {
 	path := filepath.Join(root, "profiles.ini")
 	data, err := os.ReadFile(path)
@@ -105,14 +105,12 @@ func firefoxProfiles(root string) ([]Profile, error) {
 		if !strings.HasPrefix(sec.name, "Profile") || sec.keys["Path"] == "" {
 			continue
 		}
-		p := Profile{Dir: sec.keys["Path"], Name: sec.keys["Name"]}
-		folder := p.Dir
-		if sec.keys["IsRelative"] == "1" {
-			if !isRelativeFolder(p.Dir) {
-				continue
-			}
-			folder = filepath.Join(root, filepath.FromSlash(p.Dir))
+		dir, ok := firefoxProfileDir(root, sec.keys["Path"], sec.keys["IsRelative"] == "1")
+		if !ok {
+			continue
 		}
+		p := Profile{Dir: dir, Name: sec.keys["Name"]}
+		folder := filepath.Join(root, filepath.FromSlash(dir))
 		if _, err := os.Stat(folder); errors.Is(err, fs.ErrNotExist) {
 			continue
 		}
@@ -122,6 +120,24 @@ func firefoxProfiles(root string) ([]Profile, error) {
 		out = append(out, p)
 	}
 	return out, nil
+}
+
+// firefoxProfileDir gives a profile's folder relative to the Firefox
+// folder. Firefox writes an absolute path when it keeps a profile in its
+// own folder under another home's name; one outside the folder is ignored
+// (spec 9.9), so an edited profiles.ini can't send mtm looking elsewhere.
+func firefoxProfileDir(root, path string, isRelative bool) (string, bool) {
+	if !isRelative {
+		if !filepath.IsAbs(path) {
+			return "", false
+		}
+		rel, err := filepath.Rel(root, path)
+		if err != nil {
+			return "", false
+		}
+		path = filepath.ToSlash(rel)
+	}
+	return path, isRelativeFolder(path)
 }
 
 // isRelativeFolder rejects a relative profile path that climbs out of the

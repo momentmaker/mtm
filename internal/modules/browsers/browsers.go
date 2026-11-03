@@ -69,11 +69,13 @@ func New() Module { return Module{} }
 
 func (Module) Name() string { return Name }
 
-// Inventory lists the browsers that had profiles. Safari is one of the
+// Inventory lists the browsers that had profiles. Unreadable names the
+// browsers whose profile list couldn't be read. Safari is one of the
 // Safari constants.
 type Inventory struct {
-	Browsers []Browser `json:"browsers,omitempty"`
-	Safari   string    `json:"safari"`
+	Browsers   []Browser `json:"browsers,omitempty"`
+	Safari     string    `json:"safari"`
+	Unreadable []string  `json:"unreadable,omitempty"`
 }
 
 // Browser is one browser's profiles. SafeStorage is set when its Safe
@@ -84,9 +86,8 @@ type Browser struct {
 	SafeStorage bool      `json:"safe_storage,omitempty"`
 }
 
-// Profile is a profile's folder, relative to the browser's data folder (or
-// absolute, for a Firefox profile kept elsewhere), the name the browser
-// shows for it, and its extension ids.
+// Profile is a profile's folder, relative to the browser's data folder, the
+// name the browser shows for it, and its extension ids.
 type Profile struct {
 	Dir        string   `json:"dir"`
 	Name       string   `json:"name,omitempty"`
@@ -132,6 +133,7 @@ func look(env module.Env) (Inventory, []module.Finding, error) {
 				Detail: err.Error(),
 				Fix:    "Open " + b.name + " on the new Mac and check your profiles are there before you erase this Mac.",
 			})
+			inv.Unreadable = append(inv.Unreadable, b.id)
 			continue
 		}
 		if len(ps) == 0 {
@@ -255,6 +257,17 @@ func (Module) Steps(env module.Env) ([]checklist.Item, error) {
 			Detail: "Your cookies came across with Migration Assistant, so most sites should still know you.",
 		})
 	}
+	for _, id := range inv.Unreadable {
+		b, ok := byID(id)
+		if !ok {
+			continue
+		}
+		items = append(items, checklist.Item{
+			ID: Name + ":check:" + b.id, Module: Name, Where: b.name,
+			Title:  "Open " + b.name + " and check your profiles and saved passwords arrived",
+			Detail: "mtm couldn't read " + b.name + "'s profile list on the old Mac, so verify doesn't check it.",
+		})
+	}
 	return items, nil
 }
 
@@ -276,6 +289,12 @@ func (Module) Verify(env module.Env, _ *stage.Stage) ([]module.Check, error) {
 			return nil, err
 		}
 		checks = append(checks, cs...)
+	}
+	for _, id := range inv.Unreadable {
+		if b, ok := byID(id); ok {
+			checks = append(checks, module.Check{Module: Name, ID: Name + ":" + b.id + ":unreadable", Status: module.StatusInfo,
+				Title: b.name + " profiles", Detail: "mtm couldn't read them on the old Mac; mtm checklist has a step to check them"})
+		}
 	}
 	if c, ok := safariCheck(inv.Safari); ok {
 		checks = append(checks, c)
@@ -350,7 +369,9 @@ func safeStorageCheck(env module.Env, b browser) (module.Check, error) {
 	if !found {
 		c.Status = module.StatusFail
 		c.Detail = "missing from the keychain, so " + b.name + " can't read the saved passwords and cookies from the old Mac. " +
-			"Before you erase it, copy the password of its \"" + b.safeStorage + "\" item in Keychain Access to the same item here, or export " + b.name + "'s passwords there"
+			"Don't open " + b.name + " on this Mac until this is fixed: it would make a new key, which mtm can't tell from the old one. " +
+			"On the old Mac, copy the password of the \"" + b.safeStorage + "\" item in Keychain Access; here, add a password item with that name, account \"" + b.name + "\", and that password, or replace the password of the item " + b.name + " made. " +
+			"Or export " + b.name + "'s passwords on the old Mac before you erase it"
 	}
 	return c, nil
 }

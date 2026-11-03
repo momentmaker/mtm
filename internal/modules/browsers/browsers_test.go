@@ -10,6 +10,7 @@ import (
 	"testing"
 	"time"
 
+	"github.com/momentmaker/mtm/internal/checklist"
 	"github.com/momentmaker/mtm/internal/manifest"
 	"github.com/momentmaker/mtm/internal/module"
 	"github.com/momentmaker/mtm/internal/runner"
@@ -143,8 +144,75 @@ func TestPrepareWarnsAboutAProfileListItCannotRead(t *testing.T) {
 	if len(res.Problems) != 1 || res.Problems[0].ID != "chrome:unreadable" || res.Problems[0].Severity != module.SeverityWarn {
 		t.Errorf("problems = %+v, want a warning for Chrome", res.Problems)
 	}
-	if inv := res.Inventory.(Inventory); len(inv.Browsers) != 1 || inv.Browsers[0].ID != "firefox" {
+	inv := res.Inventory.(Inventory)
+	if len(inv.Browsers) != 1 || inv.Browsers[0].ID != "firefox" {
 		t.Errorf("browsers = %+v, want Firefox still recorded", inv.Browsers)
+	}
+	if !slices.Equal(inv.Unreadable, []string{"chrome"}) {
+		t.Errorf("unreadable = %q, want [chrome]", inv.Unreadable)
+	}
+	m := manifest.New("test")
+	if err := m.SetModule(Name, time.Now(), inv); err != nil {
+		t.Fatal(err)
+	}
+	items, err := New().Steps(env(t.TempDir(), keychain(true), m))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.ContainsFunc(items, func(it checklist.Item) bool { return it.ID == "browsers:check:chrome" }) {
+		t.Errorf("steps = %+v, want browsers:check:chrome", items)
+	}
+	checks, err := New().Verify(env(home, keychain(true), m), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c, ok := checkByID(checks, "browsers:chrome:unreadable")
+	if !ok || c.Status != module.StatusInfo {
+		t.Errorf("unreadable check = %+v, want an info check", c)
+	}
+}
+
+func writeAbsoluteProfilesINI(t *testing.T, home, profile string) {
+	t.Helper()
+	testutil.WriteFile(t, filepath.Join(home, firefoxDir, "profiles.ini"),
+		"[Profile0]\nName=work\nIsRelative=0\nPath="+profile+"\n")
+}
+
+func TestAnAbsoluteFirefoxProfileInsideTheFirefoxFolderIsRecordedRelative(t *testing.T) {
+	oldHome := t.TempDir()
+	profile := filepath.Join(oldHome, firefoxDir, "Profiles", "abs.work")
+	testutil.WriteFile(t, filepath.Join(profile, "extensions.json"), extensionsJSON)
+	writeAbsoluteProfilesINI(t, oldHome, profile)
+	inv, m := prepared(t, oldHome)
+	if len(inv.Browsers) != 1 || len(inv.Browsers[0].Profiles) != 1 {
+		t.Fatalf("browsers = %+v, want one Firefox profile", inv.Browsers)
+	}
+	p := inv.Browsers[0].Profiles[0]
+	if p.Dir != "Profiles/abs.work" || !slices.Equal(p.Extensions, []string{"uBlock0@raymondhill.net"}) {
+		t.Errorf("profile = %+v, want a relative Dir and its extension", p)
+	}
+
+	newHome := filepath.Join(t.TempDir(), "other-name")
+	testutil.Copy(t, oldHome, newHome)
+	writeAbsoluteProfilesINI(t, newHome, filepath.Join(newHome, firefoxDir, "Profiles", "abs.work"))
+	checks, err := New().Verify(env(newHome, keychain(true), m), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	c, _ := checkByID(checks, "browsers:firefox:profiles")
+	if c.Status != module.StatusPass {
+		t.Errorf("profiles check = %+v, want pass on the new home", c)
+	}
+}
+
+func TestAnAbsoluteFirefoxProfileOutsideTheFirefoxFolderIsIgnored(t *testing.T) {
+	elsewhere := t.TempDir()
+	testutil.WriteFile(t, filepath.Join(elsewhere, "abs.work", "extensions.json"), extensionsJSON)
+	home := t.TempDir()
+	writeAbsoluteProfilesINI(t, home, filepath.Join(elsewhere, "abs.work"))
+	inv, _ := prepared(t, home)
+	if len(inv.Browsers) != 0 {
+		t.Errorf("browsers = %+v, want the outside profile ignored", inv.Browsers)
 	}
 }
 
@@ -266,7 +334,7 @@ func TestVerifyFailsWhenTheSafeStorageKeyIsMissing(t *testing.T) {
 		t.Fatal(err)
 	}
 	c, _ := checkByID(checks, "browsers:chrome:safe-storage")
-	if c.Status != module.StatusFail || !c.Critical || !strings.Contains(c.Detail, "Keychain Access") {
+	if c.Status != module.StatusFail || !c.Critical || !strings.Contains(c.Detail, "Keychain Access") || !strings.Contains(c.Detail, "Don't open Chrome") {
 		t.Errorf("Safe Storage check = %+v, want a critical fail with the fix", c)
 	}
 }
