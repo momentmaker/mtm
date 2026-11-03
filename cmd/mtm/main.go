@@ -46,6 +46,8 @@ Usage:
   mtm finish [--only a,b]                   on the new Mac: restore what prepare set aside
   mtm finish --only databases --restore-dump [--force]
                                             load the Postgres safety-net dump
+  mtm checklist                             on the new Mac: go through the steps left to do by hand
+  mtm checklist list [--all] [--json] | done <id>... | skip <id> --reason "..." | open <id>
   mtm verify [--only a,b] [--deep] [--details] [--json]
                                             check the new Mac against the record
   mtm cleanup [--force]                     delete ~/.mtm, and the --stage exports, after SAFE TO WIPE
@@ -55,11 +57,12 @@ Usage:
 type command func(ctx context.Context, a *app.App, args []string, stdout, stderr io.Writer) int
 
 var commands = map[string]command{
-	"scan":    cmdScan,
-	"prepare": cmdPrepare,
-	"finish":  cmdFinish,
-	"verify":  cmdVerify,
-	"cleanup": cmdCleanup,
+	"scan":      cmdScan,
+	"prepare":   cmdPrepare,
+	"finish":    cmdFinish,
+	"checklist": cmdChecklist,
+	"verify":    cmdVerify,
+	"cleanup":   cmdCleanup,
 }
 
 func main() {
