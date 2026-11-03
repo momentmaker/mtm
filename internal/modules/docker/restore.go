@@ -27,25 +27,42 @@ const (
 	restored = "restored"
 )
 
+type settlement struct {
+	How    string `json:"how"`
+	Digest string `json:"digest"`
+}
+
+// settledAs answers only for the digest finish settled against: a record
+// that changed since then has to be compared again.
+func settledAs(settled map[string]settlement, v Volume) string {
+	s := settled[v.Name]
+	if s.Digest != v.Digest {
+		return ""
+	}
+	return s.How
+}
+
+var errHoldsData = errors.New("the volume holds data")
+
 const restoreFix = "If prepare used --stage, attach that drive; otherwise check that ~/.mtm/exports arrived. Then run mtm finish --only docker again."
 
-func loadSettled(st *stage.Stage) (map[string]string, error) {
+func loadSettled(st *stage.Stage) (map[string]settlement, error) {
 	path := st.Path(settledFile)
 	data, err := os.ReadFile(path)
 	if errors.Is(err, fs.ErrNotExist) {
-		return map[string]string{}, nil
+		return map[string]settlement{}, nil
 	}
 	if err != nil {
 		return nil, fmt.Errorf("read %s: %w", path, err)
 	}
-	settled := map[string]string{}
+	settled := map[string]settlement{}
 	if err := json.Unmarshal(data, &settled); err != nil {
 		return nil, fmt.Errorf("parse %s: %w", path, err)
 	}
 	return settled, nil
 }
 
-func saveSettled(st *stage.Stage, settled map[string]string) error {
+func saveSettled(st *stage.Stage, settled map[string]settlement) error {
 	data, err := json.MarshalIndent(settled, "", "  ")
 	if err != nil {
 		return fmt.Errorf("encode %s: %w", settledFile, err)
@@ -107,7 +124,7 @@ func (m Module) settleVolumes(env module.Env, st *stage.Stage, vols []Volume) (m
 	if err != nil {
 		return res, err
 	}
-	pending := slices.DeleteFunc(slices.Clone(vols), func(v Volume) bool { return settled[v.Name] != "" })
+	pending := slices.DeleteFunc(slices.Clone(vols), func(v Volume) bool { return settledAs(settled, v) != "" })
 	if len(pending) == 0 {
 		return res, nil
 	}
@@ -125,7 +142,7 @@ func (m Module) settleVolumes(env module.Env, st *stage.Stage, vols []Volume) (m
 			res.Problems = append(res.Problems, *problem)
 			continue
 		}
-		settled[v.Name] = how
+		settled[v.Name] = settlement{How: how, Digest: v.Digest}
 		counts[how]++
 	}
 	if err := m.removeEmpty(env); err != nil {
@@ -165,6 +182,9 @@ func (m Module) settle(env module.Env, v Volume, exists bool) (string, *module.F
 		}
 	}
 	if err := m.restore(env, v, !exists); err != nil {
+		if errors.Is(err, errHoldsData) {
+			return "", m.differs(env, v)
+		}
 		return "", &module.Finding{Module: Name, ID: "volume:" + v.Name, Severity: module.SeverityBlocker, Handler: module.Manual,
 			Title: "Could not restore volume " + v.Name, Detail: err.Error(), Fix: restoreFix}
 	}
@@ -176,7 +196,10 @@ func (m Module) settle(env module.Env, v Volume, exists bool) (string, *module.F
 // then restores it like any missing volume.
 func (m Module) differs(env module.Env, v Volume) *module.Finding {
 	var steps []string
-	if cs, err := m.containers(env); err == nil {
+	detail := "mtm never overwrites a volume that holds data. These commands delete it and the containers using it; finish then restores it from the old Mac's export and re-creates the Compose containers."
+	if cs, err := m.containers(env); err != nil {
+		detail += " mtm couldn't list the containers using the volume (" + err.Error() + "); remove them first, or docker volume rm will fail."
+	} else {
 		var users []string
 		for _, c := range cs {
 			if slices.Contains(c.Volumes, v.Name) {
@@ -191,7 +214,7 @@ func (m Module) differs(env module.Env, v Volume) *module.Finding {
 	return &module.Finding{
 		Module: Name, ID: "volume:" + v.Name, Severity: module.SeverityBlocker, Handler: module.Manual,
 		Title:  "Volume " + v.Name + " holds different data from the old Mac's",
-		Detail: "mtm never overwrites a volume that holds data. These commands delete it and the containers using it; finish then restores it from the old Mac's export and re-creates the Compose containers.",
+		Detail: detail,
 		Fix:    "To replace it with the old Mac's data, run: " + strings.Join(steps, " && "),
 	}
 }
@@ -214,6 +237,11 @@ func (m Module) restore(env module.Env, v Volume, create bool) error {
 		if _, err := m.docker(env, append(args, v.Name)...); err != nil {
 			return fmt.Errorf("create volume %s: %w", v.Name, err)
 		}
+	}
+	if _, entries, err := m.volumeDigest(env, v.Name); err != nil {
+		return err
+	} else if entries > 0 {
+		return errHoldsData
 	}
 	f, err := os.Open(env.Exports.Path(v.Archive.Name))
 	if err != nil {
@@ -455,9 +483,9 @@ func (m Module) volumeChecks(env module.Env, st *stage.Stage, vols []Volume) ([]
 			c.Status, c.Detail = module.StatusFail, "prepare couldn't export it; check its data on the old Mac before you erase it"
 		case !slices.Contains(present, v.Name):
 			c.Status, c.Detail = module.StatusFail, "missing; run mtm finish --only docker to restore it"
-		case settled[v.Name] == intact:
+		case settledAs(settled, v) == intact:
 			c.Detail = "matched the old Mac's when mtm finish checked it"
-		case settled[v.Name] == restored:
+		case settledAs(settled, v) == restored:
 			c.Detail = "restored by mtm finish from the old Mac's export"
 		default:
 			if !imported {
@@ -479,7 +507,10 @@ func (m Module) volumeChecks(env module.Env, st *stage.Stage, vols []Volume) ([]
 		checks = append(checks, c)
 	}
 	if imported {
-		m.removeEmpty(env)
+		if err := m.removeEmpty(env); err != nil {
+			checks = append(checks, module.Check{Module: Name, ID: Name + ":empty-image", Status: module.StatusWarn, Title: "mtm's empty image",
+				Detail: "could not remove it: " + err.Error() + "; run: docker image rm " + macos.ShellQuote(m.Empty)})
+		}
 	}
 	return checks, nil
 }

@@ -49,7 +49,7 @@ func TestFinishSkipsTheRestoreWhenEveryVolumeArrivedIntact(t *testing.T) {
 		t.Error("finish restored a volume that arrived intact")
 	}
 	settled, err := loadSettled(w.st)
-	if err != nil || settled["acme_pgdata"] != intact || settled["cache"] != intact {
+	if err != nil || settled["acme_pgdata"].How != intact || settled["cache"].How != intact {
 		t.Errorf("settled = %v, %v", settled, err)
 	}
 }
@@ -59,6 +59,7 @@ func TestFinishRestoresAMissingVolumeWithItsLabels(t *testing.T) {
 	w.respond("volume ls --quiet", runner.Response{Stdout: "cache\n"})
 	create := "volume create --label com.docker.compose.project=acme --label com.docker.compose.volume=pgdata acme_pgdata"
 	w.respond(create, runner.Response{Stdout: "acme_pgdata\n"})
+	w.then("container cp holder-pgdata:/vol -", runner.Response{Stdout: string(volumeTar(t, root))}, runner.Response{Stdout: string(pgdataTar(t))})
 	res := w.finish(m)
 	if !w.ran(create) {
 		t.Error("finish didn't create the missing volume with its labels")
@@ -69,14 +70,14 @@ func TestFinishRestoresAMissingVolumeWithItsLabels(t *testing.T) {
 	if !slices.Contains(res.Done, "restored 1 volume from the old Mac's exports") {
 		t.Errorf("done = %q", res.Done)
 	}
-	if settled, _ := loadSettled(w.st); settled["acme_pgdata"] != restored {
+	if settled, _ := loadSettled(w.st); settled["acme_pgdata"].How != restored {
 		t.Errorf("settled = %v", settled)
 	}
 }
 
 func TestFinishRestoresAnEmptyVolume(t *testing.T) {
 	w, m := migrated(t)
-	w.then("container cp holder-pgdata:/vol -", runner.Response{Stdout: string(volumeTar(t, root))}, runner.Response{Stdout: string(pgdataTar(t))})
+	w.then("container cp holder-pgdata:/vol -", runner.Response{Stdout: string(volumeTar(t, root))}, runner.Response{Stdout: string(volumeTar(t, root))}, runner.Response{Stdout: string(pgdataTar(t))})
 	res := w.finish(m)
 	if !w.ran("container cp --archive --quiet - holder-pgdata:/") || len(res.Problems) != 0 {
 		t.Errorf("finish = %+v, want the empty volume restored", res)
@@ -98,7 +99,7 @@ func TestFinishNeverOverwritesAVolumeHoldingOtherData(t *testing.T) {
 	if w.ran("container start dbcontainer") {
 		t.Error("finish started containers while a volume is unsettled")
 	}
-	if settled, _ := loadSettled(w.st); settled["acme_pgdata"] != "" || settled["cache"] != intact {
+	if settled, _ := loadSettled(w.st); settled["acme_pgdata"].How != "" || settled["cache"].How != intact {
 		t.Errorf("settled = %v, want only cache", settled)
 	}
 }
@@ -132,9 +133,58 @@ func TestFinishLoadsMissingImagesAndListsPulls(t *testing.T) {
 	}
 }
 
+func (w *world) settledAgainst(t *testing.T, m *manifest.Manifest, pgdata, cache string) map[string]settlement {
+	t.Helper()
+	var inv Inventory
+	if _, err := m.Module(Name, &inv); err != nil {
+		t.Fatal(err)
+	}
+	settled := map[string]settlement{}
+	for _, v := range inv.Volumes {
+		switch v.Name {
+		case "acme_pgdata":
+			settled[v.Name] = settlement{How: pgdata, Digest: v.Digest}
+		case "cache":
+			settled[v.Name] = settlement{How: cache, Digest: v.Digest}
+		}
+	}
+	return settled
+}
+
+func TestFinishNeverWritesIntoAMissingVolumeThatFilledUp(t *testing.T) {
+	w, m := migrated(t)
+	w.respond("volume ls --quiet", runner.Response{Stdout: "cache\n"})
+	w.respond("volume create --label com.docker.compose.project=acme --label com.docker.compose.volume=pgdata acme_pgdata", runner.Response{})
+	w.respond("container cp holder-pgdata:/vol -", runner.Response{Stdout: string(pgdataTar(t))})
+	res := w.finish(m)
+	if p := find(res.Problems, "volume:acme_pgdata"); p.Severity != module.SeverityBlocker || !strings.Contains(p.Title, "holds different data") {
+		t.Errorf("problem = %+v, want the differs blocker", p)
+	}
+	if w.ran("container cp --archive --quiet - holder-pgdata:/") {
+		t.Error("finish wrote into a volume that filled up")
+	}
+}
+
+func TestFinishReadsAgainAVolumeSettledAgainstAnotherRecord(t *testing.T) {
+	w, m := migrated(t)
+	stale := w.settledAgainst(t, m, intact, intact)
+	for k, s := range stale {
+		s.Digest = "sha256:old"
+		stale[k] = s
+	}
+	if err := saveSettled(w.st, stale); err != nil {
+		t.Fatal(err)
+	}
+	before := w.count("image import - " + EmptyImage)
+	w.finish(m)
+	if w.count("image import - "+EmptyImage) == before {
+		t.Error("finish trusted a settlement made against another digest")
+	}
+}
+
 func TestFinishSkipsVolumesItSettledBefore(t *testing.T) {
 	w, m := migrated(t)
-	if err := saveSettled(w.st, map[string]string{"acme_pgdata": intact, "cache": restored}); err != nil {
+	if err := saveSettled(w.st, w.settledAgainst(t, m, intact, restored)); err != nil {
 		t.Fatal(err)
 	}
 	before := w.count("image import - " + EmptyImage)
@@ -266,5 +316,42 @@ func TestFinishAsksForTheStageDriveWhenItIsDetached(t *testing.T) {
 	res := w.finish(m)
 	if p := find(res.Problems, "volume:acme_pgdata"); p.Severity != module.SeverityBlocker || !strings.Contains(p.Fix, "attach that drive") {
 		t.Errorf("problem = %+v, want a blocker asking for the drive", p)
+	}
+}
+
+func TestVerifyComparesAgainVolumesSettledAgainstAnotherRecord(t *testing.T) {
+	w, m := migrated(t)
+	stale := w.settledAgainst(t, m, intact, intact)
+	for k, s := range stale {
+		s.Digest = "sha256:old"
+		stale[k] = s
+	}
+	if err := saveSettled(w.st, stale); err != nil {
+		t.Fatal(err)
+	}
+	before := w.count("image import - " + EmptyImage)
+	w.verify(m)
+	if w.count("image import - "+EmptyImage) == before {
+		t.Error("verify trusted a settlement made against another digest")
+	}
+}
+
+func TestVerifyWarnsWhenTheEmptyImageStays(t *testing.T) {
+	w, m := migrated(t)
+	w.respond("image rm "+EmptyImage, runner.Response{Code: 1})
+	c := w.verify(m)["docker:empty-image"]
+	if c.Status != module.StatusWarn || c.Critical || !strings.Contains(c.Detail, "docker image rm") {
+		t.Errorf("check = %+v, want a non-critical warn", c)
+	}
+}
+
+func TestFinishSaysWhenItCouldntListTheContainersUsingAVolume(t *testing.T) {
+	w, m := migrated(t)
+	other := volumeTar(t, root, entry{name: "vol/PG_VERSION", typ: tar.TypeReg, mode: 0o600, uid: 70, content: "17\n"})
+	w.respond("container cp holder-pgdata:/vol -", runner.Response{Stdout: string(other)})
+	w.respond("container ls --all --quiet --no-trunc", runner.Response{Code: 1})
+	p := find(w.finish(m).Problems, "volume:acme_pgdata")
+	if !strings.Contains(p.Detail, "couldn't list the containers") {
+		t.Errorf("detail = %q", p.Detail)
 	}
 }

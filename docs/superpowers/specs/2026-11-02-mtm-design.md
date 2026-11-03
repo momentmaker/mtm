@@ -352,14 +352,14 @@ Otherwise **NOT SAFE TO WIPE**, followed by the blocking items. Exit codes: `0` 
      - present with a matching content digest (Migration Assistant copied `Docker.raw` intact): nothing to do;
      - present and empty: restores it;
      - present, non-empty, and different: a **blocker**. `mtm` never overwrites it. It prints the commands that remove the volume and the containers mounting it; after the user runs them, `mtm finish --only docker` restores the volume (section 6.2, rule 4).
-     - Restoring checks the archive's fingerprint first, then streams it with `docker container cp --archive --quiet - <id>:/`. `--archive` keeps owners and modes. It then recomputes the digest, which must match.
-     - Each settled volume is written to `~/.mtm/docker-finish.json` as `intact` or `restored`.
+     - Restoring checks the archive's fingerprint first, then streams it with `docker container cp --archive --quiet - <id>:/`. `--archive` keeps owners and modes. Right before writing, it reads the volume again and writes only if it is still empty; otherwise it is the "holds different data" blocker. It then recomputes the digest, which must match.
+     - Each settled volume is written to `~/.mtm/docker-finish.json` as `intact` or `restored`, with the digest it was settled against. An entry counts as settled only while that digest matches the record.
   2. Loads each missing locally built image from its archive (`docker image load --quiet --input`), after checking its fingerprint.
   3. Prints one by-hand step: `docker pull <tag>` for each pulled image this Mac lacks. Pulls go by tag: reports mask every `sha256:` value (section 6.3), so a pull by digest couldn't be printed.
   4. When no blocker remains, starts the containers `prepare` stopped. Those that still exist get `docker container start <id>`. Missing ones are re-created through their Compose project: `docker compose --project-name <p> --project-directory <dir> --file <f>… up --detach --pull never --no-build`. Containers outside Compose that no longer exist become by-hand steps.
 - **`verify`** (a critical check per volume):
   - Docker Desktop must be installed and running, a critical fail otherwise.
-  - A volume `finish` settled passes, even if containers have changed it since: `finish` compared it before anything ran.
+  - A volume `finish` settled against the recorded digest passes, even if containers have changed it since: `finish` compared it before anything ran.
   - Otherwise the volume's digest is computed now and must match. A missing volume, a mismatch, or a volume recorded without a digest is a critical fail.
   - Each locally built image must be present by id: a fail otherwise. If only its tag now names a different image, it is info (rebuilt on the new Mac).
   - Pulled images missing by id and by tag are one warn, listing the `docker pull` commands.
