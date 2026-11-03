@@ -15,6 +15,8 @@ import (
 
 	"github.com/momentmaker/mtm/internal/app"
 	"github.com/momentmaker/mtm/internal/module"
+	"github.com/momentmaker/mtm/internal/modules/databases"
+	"github.com/momentmaker/mtm/internal/modules/docker"
 	"github.com/momentmaker/mtm/internal/modules/files"
 	"github.com/momentmaker/mtm/internal/modules/git"
 	"github.com/momentmaker/mtm/internal/modules/homebrew"
@@ -67,6 +69,8 @@ func main() {
 	os.Exit(code)
 }
 
+// defaultApp lists databases before homebrew: pg_dumpall needs Postgres
+// running, and homebrew's prepare stops it.
 func defaultApp(home string) *app.App {
 	name := currentUser()
 	return &app.App{
@@ -75,7 +79,8 @@ func defaultApp(home string) *app.App {
 		Version: version,
 		Now:     time.Now,
 		Modules: []module.Module{
-			files.New(), git.New(), system.New(name), homebrew.New(name), toolchains.New(name), loginitems.New(os.Getuid()),
+			files.New(), git.New(), system.New(name), databases.New(), docker.New(),
+			homebrew.New(name), toolchains.New(name), loginitems.New(os.Getuid()),
 		},
 	}
 }

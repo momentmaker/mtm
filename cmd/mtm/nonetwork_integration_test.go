@@ -110,6 +110,11 @@ func loadedAsRoot(plist string) bool {
 // loginitems is not covered. prepare leaves it out because it asks System
 // Events, which would show a permission prompt, and its scan and verify
 // fail here because launchctl list doesn't work inside sandbox-exec.
+//
+// docker runs but reaches no engine: it talks to Docker Desktop through
+// the socket in the home folder, and this home folder has none, so the
+// developer's containers are never stopped. Its prepare fails, asking for
+// Docker Desktop, which leaves prepare NOT READY (exit 1).
 func TestNoNetwork(t *testing.T) {
 	cache := requireIntegrationHost(t)
 	bin := filepath.Join(t.TempDir(), "mtm")
@@ -124,9 +129,9 @@ func TestNoNetwork(t *testing.T) {
 		brewfile bool
 	}{
 		{[]string{"scan"}, []int{0, 1}, false},
-		{[]string{"prepare", "--only", "files,git,system,homebrew,toolchains"}, []int{0, 1}, true},
+		{[]string{"prepare", "--only", "files,git,system,databases,docker,homebrew,toolchains"}, []int{0, 1}, true},
 		{[]string{"prepare", "--undo"}, []int{0, 1}, false},
-		{[]string{"prepare", "--only", "files,git,system,homebrew,toolchains"}, []int{0, 1}, true},
+		{[]string{"prepare", "--only", "files,git,system,databases,docker,homebrew,toolchains"}, []int{0, 1}, true},
 		{[]string{"verify"}, []int{1}, false},
 	}
 	for _, s := range steps {

@@ -247,7 +247,7 @@ func TestDefaultAppModules(t *testing.T) {
 	for _, m := range defaultApp(t.TempDir()).Modules {
 		names = append(names, m.Name())
 	}
-	if want := []string{"files", "git", "system", "homebrew", "toolchains", "loginitems"}; !slices.Equal(names, want) {
+	if want := []string{"files", "git", "system", "databases", "docker", "homebrew", "toolchains", "loginitems"}; !slices.Equal(names, want) {
 		t.Errorf("modules = %q, want %q", names, want)
 	}
 }
