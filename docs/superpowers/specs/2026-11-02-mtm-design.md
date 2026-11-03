@@ -79,7 +79,7 @@ Apple publishes no list of what Migration Assistant skips. The findings below co
 | 2 | Old Mac | `mtm prepare` | Exports Docker volumes and locally built images, dumps Postgres, stops services cleanly, writes the record to `~/.mtm/`. Records the prepare time and prints Migration Assistant instructions. Must be the last step on the old Mac before Migration Assistant. |
 | 3 | Both | Migration Assistant | The user runs it **directly Mac to Mac** (Thunderbolt cable recommended), **during the new Mac's first-boot setup** so no second user account is created, with every category selected. |
 | 4 | New Mac | `mtm finish` | `mtm` is already present because Migration Assistant copies `/opt/homebrew`. Restores Docker data only if Migration Assistant didn't bring it intact, restarts services, re-registers launch agents, then starts the checklist. |
-| 5 | New Mac | `mtm checklist` | Walks through the manual steps. Each opens the right System Settings pane or app and waits for done, or for a skip with a reason. |
+| 5 | New Mac | `mtm checklist` | Walks through the manual steps, when run in a terminal. Each opens the right System Settings pane and waits for done, for a skip with a reason, or for later. Elsewhere it lists the open steps. `list [--all] [--json]`, `done <id>…`, `skip <id> --reason "…"`, and `open <id>` do the same one step at a time. |
 | 6 | New Mac | `mtm verify` | Compares the new Mac with the record. Prints **SAFE TO WIPE** or **NOT SAFE TO WIPE** with the reasons. Can be run any number of times. |
 | 7 | Old Mac | `mtm retire` | Lists anything on the old Mac that changed after `prepare`. Then walks through deactivating licenses, signing out of iCloud and turning off Find My, removing old Secure Enclave keys from services, and "Erase All Content and Settings". `mtm` never erases anything itself. |
 | 8 | New Mac | `mtm cleanup` | After SAFE TO WIPE, deletes the exports and the record, including a `prepare --stage` folder when its drive is attached. Reminds the user to revoke the terminal's Full Disk Access. Refuses before SAFE TO WIPE unless `--force` is passed. |
@@ -152,12 +152,12 @@ cmd/mtm/            entry point, subcommand parsing (standard library flag packa
 internal/runner/    the only place system commands are executed; fakeable in tests
 internal/stage/     ~/.mtm/ lifecycle: permissions, Time Machine exclusion, free-space checks, export fingerprints, external volume checks
 internal/manifest/  manifest.json and files.jsonl.gz schemas, reading and writing, schema version
-internal/catalog/   loads embedded TOML app definitions
-internal/checklist/ manual steps: generation, persisted state, interactive walk-through
+internal/catalog/   loads and checks the embedded TOML app definitions; the privacy-pane table with deep links
+internal/checklist/ manual steps: their ids, status (pending, done, skipped with a reason), and merging on re-runs
 internal/report/    terminal and JSON rendering, redaction
 internal/verdict/   combines module checks and checklist state into SAFE / NOT SAFE
 internal/modules/   one package per module (section 9)
-catalog/            TOML app definitions, embedded into the binary at build time
+catalog/            TOML app definitions and embed.go, which builds them into the binary; README.md documents the format and credits tape
 ```
 
 ### 7.3 Module contract
@@ -173,7 +173,8 @@ type Module interface {
 - `Env` carries the runner, home directory, catalog, and the current mode (old Mac or new Mac). Logging wraps the runner. `Env.Manifest` is the record: on the new Mac it is what `verify` and `finish` check against; during `prepare` it holds this Mac's previous record, if any, so a re-run can carry forward what the first run changed (for example, services it stopped).
 - Modules whose `prepare` changes the old Mac also implement `Undo(env, st) (Result, error)`, which `prepare --undo` calls. After a successful undo, that module's record is removed, so `verify` reports it not prepared until `prepare` runs again.
 - `Finding` has: module, id, severity (`info`, `warn`, `blocker`), handler (`migration-assistant`, `mtm`, `manual`), title, detail, fix.
-- `Result` has: what was done, artifacts written (each with its fingerprint), checklist items to add, and problems.
+- `Result` has: what was done, artifacts written (each with its fingerprint), checklist items to add, and problems. `finish` merges every module's items into `state.json`. An item already there keeps its status and gets the new text, so `finish` can run again.
+- A `Check` can name the checklist items it proves done (`Resolves`). When it passes, `verify` marks them done, as the `permissions` module does for each grant it finds.
 - `Check` has: module, id, status (`pass`, `fail`, `warn`, `info`), critical flag, title, detail.
 - Modules never print. All output goes through `report`.
 
@@ -195,8 +196,14 @@ reactivate = false
 [state]
 volatile = ["~/Library/Application Support/com.raycast.macos/*.log"]
 ```
-- Fields: identity (`id`, `name`, `bundle_id`), required privacy permissions, license reactivation (with optional deactivate steps for `retire`), state locations, volatile paths (expected to change or disappear), and per-app checklist notes.
-- System Settings deep links live in one table keyed by permission service and macOS major version. They are not repeated in each app file.
+- Fields:
+  - identity: `id` (lowercase words joined by hyphens, matching the file name), `name`, and `bundle_id`;
+  - required privacy permissions: `[[permissions]]`, each with `service` and an optional `client`, for when macOS records the grant for a helper rather than the app;
+  - license reactivation: `[license]`, with `reactivate` and a `note`. Deactivate steps for `retire` come with `retire`.
+  - per-app checklist `notes`;
+  - `[state]` `volatile` paths (`~/` patterns of files the app deletes on its own). The `files` module treats a missing one as info.
+- The tests reject a file with an unknown key, an unknown service, a malformed id or bundle id, or a bundle id already in another file.
+- Privacy panes live in one table in `internal/catalog`, with each pane's name, its privacy-database service id, and its System Settings deep link per macOS major version. They are not repeated in each app file. A macOS major without a checked link gets the pane's name and no link.
 - Initial data is seeded from the `tape` project's definitions (BSD-2-Clause, credited). mackup's GPL-3 database is not copied.
 - Adding an app means adding a file. The contributor guide documents the format, and CI validates every file.
 
@@ -215,7 +222,7 @@ volatile = ["~/Library/Application Support/com.raycast.macos/*.log"]
     docker/images/   one <image id>.tar per locally built image (docker image save output)
     postgres/        one <cluster>.sql.gz per running cluster (pg_dumpall output)
   docker-finish.json new Mac only: volumes finish found intact or restored
-  state.json         new Mac only: checklist progress, last verify result
+  state.json         new Mac only: checklist steps with their status and skip reasons, last verify result
   logs/              one log file per command run, redacted
 ```
 All paths in the record are relative to the home folder, so verification works if the username differs on the new Mac.
@@ -386,14 +393,20 @@ Otherwise **NOT SAFE TO WIPE**, followed by the blocking items. Exit codes: `0` 
 ### 9.7 `loginitems`
 - Records each launch agent in `~/Library/LaunchAgents` (`*.plist` only), with its `Label` and whether it is loaded (`launchctl list`).
 - `prepare`, not `scan`, records login items through System Events (`osascript`). That triggers a one-time Automation permission prompt, which `scan` explains beforehand. If access is denied, `prepare` warns and asks the user to note their login items by hand.
-- `finish` bootstraps the launch agents that were loaded and aren't now (`launchctl bootstrap gui/<uid> <plist>`). A failure becomes a by-hand step pointing at Login Items approvals. `finish` also lists the login items to add again. Until Stage 4's checklist exists, these print as by-hand steps.
+- `finish` bootstraps the launch agents that were loaded and aren't now (`launchctl bootstrap gui/<uid> <plist>`). A failure becomes a by-hand step pointing at Login Items approvals. `finish` also adds a checklist step for each login item to add again, with a link to Login Items. If `prepare` couldn't list them, the step is to note them on the old Mac first.
 - `verify` warns when an agent that was loaded isn't now, and lists the login items to add again (info).
 
 ### 9.8 `permissions`
-- **With Full Disk Access:** reads grants from the user and system privacy permissions databases with `/usr/bin/sqlite3` in read-only mode. Records service and client only.
-- **Without it:** infers expected grants from catalog entries for installed apps.
-- **`finish`:** creates one checklist item per app and permission, with a System Settings deep link.
-- **`verify`:** with Full Disk Access, checks the grants exist and marks items done. Without it, relies on user confirmation.
+- **Reading grants.** It reads the user's privacy database (`~/Library/Application Support/com.apple.TCC/TCC.db`) and the system one (`/Library/Application Support/com.apple.TCC/TCC.db`) with `/usr/bin/sqlite3 -readonly -json`.
+  - It selects only granted rows (`auth_value = 2`), and only service, client, client type, and, for Automation, the target app.
+  - macOS refuses to open either database without Full Disk Access ("authorization denied"). That refusal is how `mtm` tells Full Disk Access is missing; any other sqlite3 error is a failure.
+- **`scan`:** with Full Disk Access, an info finding with the number of grants. Without it, a warn: `mtm` will use its catalog instead. The fix is to give the terminal Full Disk Access.
+- **`prepare`:** records the grants (source `tcc`). Without Full Disk Access it records source `catalog` and warns the same way.
+- **`finish`:** creates one checklist item per expected grant, with the pane's name and its deep link for this Mac's macOS.
+  - The expected grants are the recorded ones. With a `catalog` record, they are what the catalog lists for the apps in the `system` module's record.
+  - Grants for services System Settings doesn't show, which macOS uses internally, get no item.
+  - Item ids are `permissions:<client>:<pane>`, plus `:<target>` for Automation.
+- **`verify`:** with Full Disk Access on the new Mac, a passing check resolves the items whose grants are present, and a warn lists the rest. Without it, one info check asks the user to mark the items done in `mtm checklist`. Permissions are not critical checks; their checklist items count for the verdict.
 
 ### 9.9 `browsers`
 - **Chromium family (Chrome, Brave, Arc):**
@@ -423,6 +436,7 @@ Otherwise **NOT SAFE TO WIPE**, followed by the blocking items. Exit codes: `0` 
   - app inventory of `/Applications` and `~/Applications`, including one level of subfolders, skipping Apple's own `com.apple.*` apps and symlinks. Each app records its bundle id, version (`plutil -extract … raw`), and architectures (`lipo -archs`). Home apps are recorded as `~/Applications/…`.
 - **`scan` and `prepare`:** warn about Intel-only apps. They need Rosetta on the new Mac, and Rosetta is limited after macOS 27.
 - **`finish`:**
+  - Adds checklist items from the catalog for the recorded apps: one to reactivate each license marked `reactivate`, and one per note.
   - Prints `sudo softwareupdate --install-rosetta --agree-to-license` if Rosetta is needed and missing.
   - For each `/etc` file that differs, prints `sudo install -m 0644 -o root -g wheel <copy> /etc/<file>`. `install` rather than `cp`, because the private copy is 0600 and `cp` would give a new `/etc` file that mode.
   - When the login shell changed, prints one line to paste: `echo <shell> | sudo tee -a /etc/shells >/dev/null && chsh -s <shell>`, without the `tee` part if the shell is already listed.
@@ -480,5 +494,5 @@ Otherwise **NOT SAFE TO WIPE**, followed by the blocking items. Exit codes: `0` 
 2. **The macOS 26 "Privacy & Security Settings" checkbox** in Migration Assistant has undocumented scope. If it does migrate privacy permissions, the `permissions` module's verify step marks those checklist items done automatically. The design works either way.
 3. **Whether Migration Assistant copies `Docker.raw` intact** is unconfirmed. The design handles both outcomes (section 9.5). `Docker.raw` is also a sparse file: on the author's Mac it is 494 GB with 49 GB in use. If Migration Assistant doesn't keep it sparse, the new Mac needs the full size free.
 4. **Google session binding (Device Bound Session Credentials)** comes from a single news source. The design treats re-sign-in as a checklist item, which costs little if it turns out unnecessary.
-5. **System Settings deep links** change between macOS versions. Each link in the catalog table is checked manually on every supported macOS major version before release.
+5. **System Settings deep links** change between macOS versions. Each link in the catalog table is checked manually on every supported macOS major version before release. The macOS 26 links (`com.apple.settings.PrivacySecurity.extension?Privacy_…` and `com.apple.LoginItems-Settings.extension`) have not been checked yet.
 6. **The volatile-path list** will be incomplete at first. Expect the first real migrations to surface `appstate` warnings that become catalog entries.

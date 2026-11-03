@@ -93,9 +93,37 @@ Found in the final review.
 - **Free space** comes from statfs `f_bavail`, which leaves out APFS purgeable space.
 
 ## Stage 4: Manual steps and `retire`
-**Goal**: the TOML app catalog (seeded from `tape`, BSD-2), the `checklist` engine and `mtm checklist` (done, skip with reason, persisted in `state.json`, System Settings deep links), the `permissions`, `browsers`, and `secrets` modules, and `mtm retire` (changes on the old Mac since `prepare`, plus the retirement checklist). The verdict starts counting open checklist items.
-**Success Criteria**: an open checklist item blocks SAFE TO WIPE, and skipping it with a reason unblocks it. `retire` lists a file changed on the old Mac after `prepare`. Catalog files are validated in tests.
-**Tests**: catalog validation tests; checklist state tests; module unit tests with fixtures; `retire` integration test on a temp home folder.
+Stage 4 is planned and built in two parts, so each part ships working software and gets its own review.
+
+### Stage 4, Part 1: Catalog, checklist, and permissions
+**Goal**:
+- the TOML app catalog, seeded from `tape` (BSD-2);
+- the `checklist` engine and `mtm checklist` (a walk-through, plus done, skip with a reason, and open), persisted in `state.json`, with System Settings deep links;
+- checklist items from `finish` (`permissions`, the catalog's license and note steps through `system`, and login items through `loginitems`);
+- the `permissions` module;
+- the catalog's volatile paths in the `files` module.
+
+The verdict starts counting open checklist items.
+
+**Success Criteria**: an open checklist item blocks SAFE TO WIPE, and skipping it with a reason unblocks it. A passing check can resolve items. Catalog files are validated in tests.
+**Tests**:
+- catalog validation tests over every built-in file;
+- checklist merge and state tests;
+- `mtm checklist` CLI tests, including the walk-through;
+- `permissions` unit tests with sqlite3 output fixtures;
+- the no-network test runs `permissions` too.
+
+**Plan**: `docs/superpowers/plans/2026-11-02-mtm-stage4-part1-catalog-checklist-permissions.md`
+**Status**: Not Started
+
+### Stage 4, Part 2: Browsers, secrets, and `retire`
+**Goal**:
+- the `browsers` module (Chromium profiles and extensions, Safe Storage presence, Firefox, Safari);
+- the `secrets` module (SSH and GPG identities, Secure Enclave keys, password managers from the catalog);
+- `mtm retire` (changes on the old Mac since `prepare`, plus the retirement checklist, with the catalog's license deactivation steps).
+
+**Success Criteria**: `retire` lists a file changed on the old Mac after `prepare`. SSH and GPG identities are critical checks.
+**Tests**: module unit tests with fixtures; a `retire` integration test on a temp home folder.
 **Status**: Not Started
 
 ## Stage 5: Ship
