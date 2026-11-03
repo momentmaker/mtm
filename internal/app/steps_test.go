@@ -4,11 +4,13 @@ import (
 	"errors"
 	"strings"
 	"testing"
+	"time"
 
 	"github.com/momentmaker/mtm/internal/checklist"
 	"github.com/momentmaker/mtm/internal/runner"
 	"github.com/momentmaker/mtm/internal/stage"
 	"github.com/momentmaker/mtm/internal/state"
+	"github.com/momentmaker/mtm/internal/testutil"
 )
 
 func savedSteps(t *testing.T, items ...checklist.Item) string {
@@ -44,11 +46,18 @@ func TestMarkDoneAndSkipAreSaved(t *testing.T) {
 	}
 }
 
+// noFallbackApp answers commands only from its canned responses, unlike
+// stepApp: if OpenStep let through a link it should refuse, or changed how
+// it calls open, the test fails instead of opening it on this Mac.
+func noFallbackApp(home string) *App {
+	return &App{Runner: &runner.Fake{Responses: testutil.MacResponses(newUUID)}, Home: home, Version: "test", Now: time.Now}
+}
+
 func TestOpenStepOpensItsSettingsPane(t *testing.T) {
 	linked := grantStep
 	linked.Link = "x-apple.systempreferences:com.apple.settings.PrivacySecurity.extension?Privacy_Accessibility"
 	home := savedSteps(t, linked)
-	a := stepApp(home, newUUID)
+	a := noFallbackApp(home)
 	fake := a.Runner.(*runner.Fake)
 	fake.Responses["/usr/bin/open "+linked.Link] = runner.Response{}
 	if err := a.OpenStep(ctx, linked.ID); err != nil {
@@ -63,7 +72,7 @@ func TestOpenStepRefusesALinkMtmDidntMake(t *testing.T) {
 	odd := grantStep
 	odd.Link = "file:///Applications/Calculator.app"
 	home := savedSteps(t, odd)
-	a := stepApp(home, newUUID)
+	a := noFallbackApp(home)
 	if err := a.OpenStep(ctx, odd.ID); !errors.Is(err, ErrRefusedLink) {
 		t.Errorf("err = %v", err)
 	}
@@ -76,7 +85,7 @@ func TestOpenStepWithoutALinkNamesThePlace(t *testing.T) {
 	plain := licenseStep
 	plain.Where = "Dash > Settings > License"
 	home := savedSteps(t, plain)
-	if err := stepApp(home, newUUID).OpenStep(ctx, plain.ID); !errors.Is(err, ErrNoLink) || !strings.Contains(err.Error(), "Dash > Settings") {
+	if err := noFallbackApp(home).OpenStep(ctx, plain.ID); !errors.Is(err, ErrNoLink) || !strings.Contains(err.Error(), "Dash > Settings") {
 		t.Errorf("err = %v", err)
 	}
 }
