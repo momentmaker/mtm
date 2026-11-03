@@ -111,6 +111,20 @@ type Stepper interface {
 	Steps(env Env) ([]checklist.Item, error)
 }
 
+// Retirement is what a module gives mtm retire on the old Mac. Changes are
+// what changed there since prepare, which the new Mac may not have; Steps
+// are things to do before the old Mac is erased, such as releasing a
+// license.
+type Retirement struct {
+	Changes []Check
+	Steps   []checklist.Item
+}
+
+// Retirer is implemented by modules with something for mtm retire.
+type Retirer interface {
+	Retire(env Env, st *stage.Stage) (Retirement, error)
+}
+
 // Undoer is implemented by modules whose prepare changes the old Mac, so
 // prepare --undo can put it back.
 type Undoer interface {
