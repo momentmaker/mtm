@@ -17,9 +17,17 @@ import (
 	"github.com/momentmaker/mtm/internal/testutil"
 )
 
-// denyNetwork blocks every outbound IP connection but leaves local sockets,
-// which launchctl and brew services need.
-const denyNetwork = "(version 1)(allow default)(deny network-outbound (remote ip))"
+// sandboxProfile blocks every outbound IP connection but leaves local
+// sockets, which launchctl and brew services need.
+//
+// It also refuses reads in the system privacy database's folder, so the
+// permissions module never reads the developer's real grants, even from a
+// terminal with Full Disk Access. sqlite3 then gets EPERM, as it does
+// without Full Disk Access, and prints "authorization denied", and
+// permissions falls back to the catalog. The temporary home folder
+// already keeps the user's privacy database out of reach.
+const sandboxProfile = "(version 1)(allow default)(deny network-outbound (remote ip))" +
+	`(deny file-read* (subpath "/Library/Application Support/com.apple.TCC"))`
 
 // networkSigns are what curl, git, and the resolver print when the sandbox
 // refuses a connection. A clean run prints none of them.
@@ -111,6 +119,10 @@ func loadedAsRoot(plist string) bool {
 // Events, which would show a permission prompt, and its scan and verify
 // fail here because launchctl list doesn't work inside sandbox-exec.
 //
+// permissions runs, but the sandbox refuses it the real privacy databases
+// (see sandboxProfile), so scan and prepare must say they're using the
+// catalog instead.
+//
 // docker runs but reaches no engine: it talks to Docker Desktop through
 // the socket in the home folder, and this home folder has none, so the
 // developer's containers are never stopped. Its prepare fails, asking for
@@ -124,19 +136,20 @@ func TestNoNetwork(t *testing.T) {
 	home := t.TempDir()
 	testutil.WriteFile(t, filepath.Join(home, ".zshrc"), "export A=1\n")
 	steps := []struct {
-		args     []string
-		codes    []int
-		brewfile bool
+		args            []string
+		codes           []int
+		brewfile        bool
+		catalogFallback bool
 	}{
-		{[]string{"scan"}, []int{0, 1}, false},
-		{[]string{"prepare", "--only", "files,git,system,databases,docker,homebrew,toolchains,permissions"}, []int{0, 1}, true},
-		{[]string{"prepare", "--undo"}, []int{0, 1}, false},
-		{[]string{"prepare", "--only", "files,git,system,databases,docker,homebrew,toolchains,permissions"}, []int{0, 1}, true},
-		{[]string{"verify"}, []int{1}, false},
+		{[]string{"scan"}, []int{0, 1}, false, true},
+		{[]string{"prepare", "--only", "files,git,system,databases,docker,homebrew,toolchains,permissions"}, []int{0, 1}, true, true},
+		{[]string{"prepare", "--undo"}, []int{0, 1}, false, false},
+		{[]string{"prepare", "--only", "files,git,system,databases,docker,homebrew,toolchains,permissions"}, []int{0, 1}, true, true},
+		{[]string{"verify"}, []int{1}, false, false},
 	}
 	for _, s := range steps {
 		name := "mtm " + strings.Join(s.args, " ")
-		cmd := exec.Command("/usr/bin/sandbox-exec", append([]string{"-p", denyNetwork, bin}, s.args...)...)
+		cmd := exec.Command("/usr/bin/sandbox-exec", append([]string{"-p", sandboxProfile, bin}, s.args...)...)
 		// The temp home would hide Homebrew's package data, which every real
 		// install keeps in its cache; mtm itself checks that it is there.
 		cmd.Env = append(os.Environ(), "HOME="+home, "HOMEBREW_CACHE="+cache)
@@ -154,6 +167,9 @@ func TestNoNetwork(t *testing.T) {
 		}
 		if s.brewfile && !strings.Contains(text, "homebrew: saved a Brewfile") {
 			t.Errorf("%s did not save a Brewfile:\n%s", name, text)
+		}
+		if s.catalogFallback && !strings.Contains(text, "privacy permissions without Full Disk Access") {
+			t.Errorf("%s didn't fall back to the catalog, so it may have read a privacy database:\n%s", name, text)
 		}
 		for _, sign := range networkSigns {
 			if strings.Contains(text, sign) {
