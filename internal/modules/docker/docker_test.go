@@ -389,3 +389,29 @@ func TestPrepareRecordsAVolumeThatVanishedWithoutADigest(t *testing.T) {
 		t.Error("a holder was created for the vanished volume")
 	}
 }
+
+func TestPrepareRecordsVolumesWithoutDigestsWhenTheRelistFails(t *testing.T) {
+	w := newWorld(t)
+	w.oldMac()
+	w.then("volume ls --quiet", runner.Response{Stdout: "acme_pgdata\ncache\nnfs\n"}, runner.Response{Code: 1, Stderr: "daemon went away"})
+	res, inv := w.prepare(record(t, Inventory{}))
+	if f := find(res.Problems, "list"); f.Severity != module.SeverityBlocker {
+		t.Errorf("problems = %+v, want a list blocker", res.Problems)
+	}
+	if len(inv.Volumes) != 2 {
+		t.Fatalf("volumes = %+v", inv.Volumes)
+	}
+	for _, v := range inv.Volumes {
+		if v.Digest != "" || v.Archive != nil {
+			t.Errorf("volume %+v, want no digest or archive", v)
+		}
+	}
+	if w.ran("image import - " + EmptyImage) {
+		t.Error("prepare exported volumes after it could not list them")
+	}
+	for _, c := range w.fake.Calls() {
+		if strings.Contains(c.String(), "container create") {
+			t.Errorf("a holder was created: %q", c.String())
+		}
+	}
+}
