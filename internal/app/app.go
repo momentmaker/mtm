@@ -397,14 +397,16 @@ func mergeSteps(env module.Env, mods []module.Module, m *manifest.Manifest, l *c
 	return added, failed
 }
 
-// resolve marks done the checklist steps a passing check proved done.
+// resolve marks done the pending checklist steps a passing check proved
+// done. A step the user already closed keeps what they recorded, such as a
+// skip's reason.
 func resolve(l *checklist.List, checks []module.Check, at time.Time) {
 	for _, c := range checks {
 		if c.Status != module.StatusPass {
 			continue
 		}
 		for _, id := range c.Resolves {
-			if _, ok := l.Find(id); ok {
+			if e, ok := l.Find(id); ok && e.Status == checklist.Pending {
 				l.Done(id, at)
 			}
 		}

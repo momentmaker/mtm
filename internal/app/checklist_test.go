@@ -70,16 +70,20 @@ func loadState(t *testing.T, home string) state.State {
 	return s
 }
 
+// skip closes a step in home's checklist as mtm checklist skip does, at
+// the time given.
+func skip(t *testing.T, home, id, reason string, at time.Time) {
+	t.Helper()
+	a := stepApp(home, newUUID)
+	a.Now = func() time.Time { return at }
+	if err := a.Skip(id, reason); err != nil {
+		t.Fatal(err)
+	}
+}
+
 func TestFinishKeepsWhatTheUserDidWhenItRunsAgain(t *testing.T) {
 	newHome := finishedNewMac(t, stepsModule{})
-	st, _ := stage.Existing(newHome)
-	s := loadState(t, newHome)
-	if err := s.Checklist.Skip(licenseStep.ID, "sold the license", time.Now()); err != nil {
-		t.Fatal(err)
-	}
-	if err := state.Save(st, s); err != nil {
-		t.Fatal(err)
-	}
+	skip(t, newHome, licenseStep.ID, "sold the license", time.Now())
 	rep, err := stepApp(newHome, newUUID, stepsModule{}).Finish(ctx, FinishOptions{})
 	if err != nil || rep.Pending != 1 {
 		t.Errorf("second finish = %+v, %v; want 1 pending step", rep, err)
@@ -113,13 +117,45 @@ func TestVerifyMarksDoneTheStepsAPassingCheckProves(t *testing.T) {
 
 func TestVerifyIsSafeOnceEveryStepIsClosed(t *testing.T) {
 	newHome := finishedNewMac(t, stepsModule{})
-	st, _ := stage.Existing(newHome)
-	s := loadState(t, newHome)
-	s.Checklist.Skip(licenseStep.ID, "sold the license", time.Now())
-	state.Save(st, s)
+	skip(t, newHome, licenseStep.ID, "sold the license", time.Now())
 	rep, err := stepApp(newHome, newUUID, stepsModule{grants: true}).Verify(ctx, VerifyOptions{})
 	if err != nil || !rep.Verdict.Safe {
 		t.Errorf("verify = %+v, %v; want SAFE", rep.Verdict, err)
+	}
+}
+
+func TestVerifyKeepsWhatTheUserRecordedForAStepItProves(t *testing.T) {
+	newHome := finishedNewMac(t, stepsModule{})
+	skippedAt := time.Date(2026, 11, 3, 9, 0, 0, 0, time.UTC)
+	skip(t, newHome, grantStep.ID, "granted by my company's device management", skippedAt)
+	if _, err := stepApp(newHome, newUUID, stepsModule{grants: true}).Verify(ctx, VerifyOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	e, _ := loadState(t, newHome).Checklist.Find(grantStep.ID)
+	if e.Status != checklist.Skipped || e.Reason != "granted by my company's device management" || !e.At.Equal(skippedAt) {
+		t.Errorf("step = %+v, want it skipped as the user recorded", e)
+	}
+}
+
+func TestResolveLeavesStepsOpenWhenTheCheckDoesNotPass(t *testing.T) {
+	var l checklist.List
+	l.Add(grantStep)
+	resolve(&l, []module.Check{
+		{ID: "steps:warn", Status: module.StatusWarn, Resolves: []string{grantStep.ID}},
+		{ID: "steps:fail", Status: module.StatusFail, Resolves: []string{grantStep.ID}},
+		{ID: "steps:info", Status: module.StatusInfo, Resolves: []string{grantStep.ID}},
+	}, time.Now())
+	if e, _ := l.Find(grantStep.ID); e.Status != checklist.Pending {
+		t.Errorf("step = %+v, want it still pending", e)
+	}
+}
+
+func TestResolveIgnoresAStepTheChecklistDoesNotHave(t *testing.T) {
+	var l checklist.List
+	l.Add(grantStep)
+	resolve(&l, []module.Check{{ID: "steps:grants", Status: module.StatusPass, Resolves: []string{"steps:gone", grantStep.ID}}}, time.Now())
+	if len(l.Entries) != 1 || l.Entries[0].Status != checklist.Done {
+		t.Errorf("checklist = %+v, want only the grant step, done", l.Entries)
 	}
 }
 
