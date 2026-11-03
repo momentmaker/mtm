@@ -190,33 +190,31 @@ func (m Module) Finish(env module.Env, _ *stage.Stage) (module.Result, error) {
 	if len(ok) > 0 {
 		res.Done = append(res.Done, "loaded "+strings.Join(ok, ", "))
 	}
-	items, err := loginItemSteps(env, old)
-	if err != nil {
-		return module.Result{}, err
-	}
-	res.Checklist = items
+	res.Checklist = loginItemSteps(env, old)
 	return res, nil
 }
 
 // loginItemSteps asks the user to add each login item back: macOS keeps
 // the list outside the files Migration Assistant copies. When prepare
 // couldn't read the list, the step is to read it on the old Mac first.
-func loginItemSteps(env module.Env, old Inventory) ([]checklist.Item, error) {
+func loginItemSteps(env module.Env, old Inventory) []checklist.Item {
+	// The link is optional: without the version there is no link, but the
+	// steps and the work finish already did must not be lost.
 	major, err := macos.MajorVersion(env.Ctx, env.Run)
 	if err != nil {
-		return nil, err
+		major = ""
 	}
 	step := func(id, title string) checklist.Item {
 		return checklist.Item{ID: Name + ":" + id, Module: Name, Title: title, Where: loginItemsPane, Link: catalog.LoginItemsLink(major)}
 	}
 	if !old.LoginItemsListed {
-		return []checklist.Item{step("from-old-mac", "Note your login items on the old Mac and add them here")}, nil
+		return []checklist.Item{step("from-old-mac", "Note your login items on the old Mac and add them here")}
 	}
 	var items []checklist.Item
 	for _, name := range old.LoginItems {
 		items = append(items, step(name, "Add "+name+" to Login Items again"))
 	}
-	return items, nil
+	return items
 }
 
 func (Module) Verify(env module.Env, _ *stage.Stage) ([]module.Check, error) {

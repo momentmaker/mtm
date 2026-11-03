@@ -116,6 +116,25 @@ func TestFinishLoadsAgentsAndListsLoginItems(t *testing.T) {
 	}
 }
 
+func TestFinishKeepsStepsAndDoneWhenMacOSVersionIsUnknown(t *testing.T) {
+	f := newFixture(t)
+	f.fake.Responses["/bin/launchctl list"] = runner.Response{Stdout: "PID\tStatus\tLabel\n"}
+	f.fake.Responses["/usr/bin/sw_vers -productVersion"] = runner.Response{Code: 1}
+	plist := filepath.Join(f.home, "Library", "LaunchAgents", "a.plist")
+	f.fake.Responses["/bin/launchctl bootstrap gui/501 "+plist] = runner.Response{}
+	m := record(t, Inventory{Agents: []Agent{{File: "a.plist", Label: "com.a", Loaded: true}}, LoginItems: []string{"Raycast"}, LoginItemsListed: true})
+	res, err := New(uid).Finish(f.env(m), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Equal(res.Done, []string{"loaded com.a"}) {
+		t.Errorf("done = %q", res.Done)
+	}
+	if len(res.Checklist) != 1 || res.Checklist[0].ID != "loginitems:Raycast" || res.Checklist[0].Link != "" {
+		t.Errorf("checklist = %+v, want the Raycast step with no link", res.Checklist)
+	}
+}
+
 func TestFinishBootstrapFailureIsByHand(t *testing.T) {
 	f := newFixture(t)
 	f.fake.Responses["/bin/launchctl list"] = runner.Response{Stdout: "PID\tStatus\tLabel\n"}
