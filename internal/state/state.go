@@ -1,4 +1,5 @@
-// Package state keeps mtm's progress on the new Mac in ~/.mtm/state.json.
+// Package state keeps mtm's progress in ~/.mtm: the new Mac's in
+// state.json, and the old Mac's retirement steps in retire.json.
 package state
 
 import (
@@ -13,22 +14,33 @@ import (
 	"github.com/momentmaker/mtm/internal/stage"
 )
 
-const FileName = "state.json"
+// RetireFileName holds the retirement steps, apart from state.json, so a
+// step closed on the old Mac can never count toward the new Mac's
+// verdict, even if Migration Assistant runs again and copies ~/.mtm.
+const (
+	FileName       = "state.json"
+	RetireFileName = "retire.json"
+)
 
 type VerifyResult struct {
 	At   time.Time `json:"at"`
 	Safe bool      `json:"safe"`
 }
 
-// State holds the new Mac's checklist, with what the user did with each
-// step, and the last verify result.
+// State holds a checklist, with what the user did with each step, and in
+// state.json the last verify result.
 type State struct {
 	LastVerify *VerifyResult  `json:"last_verify,omitempty"`
 	Checklist  checklist.List `json:"checklist,omitzero"`
 }
 
-func Load(st *stage.Stage) (State, error) {
-	path := st.Path(FileName)
+func Load(st *stage.Stage) (State, error) { return LoadFile(st, FileName) }
+
+func Save(st *stage.Stage, s State) error { return SaveFile(st, FileName, s) }
+
+// LoadFile reads the named state file; a missing one is empty.
+func LoadFile(st *stage.Stage, name string) (State, error) {
+	path := st.Path(name)
 	data, err := os.ReadFile(path)
 	if errors.Is(err, fs.ErrNotExist) {
 		return State{}, nil
@@ -43,10 +55,10 @@ func Load(st *stage.Stage) (State, error) {
 	return s, nil
 }
 
-func Save(st *stage.Stage, s State) error {
+func SaveFile(st *stage.Stage, name string, s State) error {
 	data, err := json.MarshalIndent(s, "", "  ")
 	if err != nil {
-		return fmt.Errorf("encode state: %w", err)
+		return fmt.Errorf("encode %s: %w", name, err)
 	}
-	return st.WriteFile(FileName, data)
+	return st.WriteFile(name, data)
 }

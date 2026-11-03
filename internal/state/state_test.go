@@ -45,3 +45,18 @@ func TestSaveLoadKeepsTheChecklist(t *testing.T) {
 		t.Errorf("entry = %+v, %v", e, ok)
 	}
 }
+
+func TestRetirementStepsAreKeptApart(t *testing.T) {
+	st, _ := stage.Open(t.TempDir())
+	var s State
+	s.Checklist.Add(checklist.Item{ID: "retire:erase", Module: "retire", Title: "Erase this Mac"})
+	if err := SaveFile(st, RetireFileName, s); err != nil {
+		t.Fatal(err)
+	}
+	if got, err := Load(st); err != nil || len(got.Checklist.Entries) != 0 {
+		t.Errorf("state.json = %+v, %v; want the retirement step kept out of it", got, err)
+	}
+	if got, err := LoadFile(st, RetireFileName); err != nil || len(got.Checklist.Entries) != 1 {
+		t.Errorf("retire.json = %+v, %v; want the step", got, err)
+	}
+}

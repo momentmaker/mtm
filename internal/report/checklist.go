@@ -19,12 +19,25 @@ func stepSymbol(e checklist.Entry) string {
 	return "–"
 }
 
+// The commands that keep a checklist: checklist on the new Mac, retire on
+// the old one.
+const (
+	ChecklistCommand = "checklist"
+	RetireCommand    = "retire"
+)
+
+// emptyChecklist says, per command, where its steps come from.
+var emptyChecklist = map[string]string{
+	ChecklistCommand: "The checklist is empty. mtm finish and mtm verify fill it on the new Mac.",
+	RetireCommand:    "There are no retirement steps yet. mtm retire adds them on the old Mac.",
+}
+
 // Checklist prints the open steps, or every step with all, each with the
-// command that closes it.
-func Checklist(w io.Writer, l checklist.List, all bool) {
+// mtm command that closes it.
+func Checklist(w io.Writer, l checklist.List, all bool, command string) {
 	open := len(l.Pending())
 	if len(l.Entries) == 0 {
-		fmt.Fprintln(w, "The checklist is empty. mtm finish and mtm verify fill it on the new Mac.")
+		fmt.Fprintln(w, emptyChecklist[command])
 		return
 	}
 	if open == 0 && !all {
@@ -40,7 +53,7 @@ func Checklist(w io.Writer, l checklist.List, all bool) {
 		writeStepBody(w, e)
 		switch {
 		case e.Open():
-			fmt.Fprintf(w, "      → mtm checklist done %s\n", clean(macos.ShellQuote(e.ID)))
+			fmt.Fprintf(w, "      → mtm %s done %s\n", command, clean(macos.ShellQuote(e.ID)))
 		case e.Status == checklist.Skipped:
 			fmt.Fprintf(w, "      skipped: %s\n", clean(e.Reason))
 		}

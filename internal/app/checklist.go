@@ -13,7 +13,7 @@ import (
 )
 
 // settingsLink is the only kind of link mtm opens: it made every
-// checklist link itself, and state.json is a file anyone with the account
+// checklist link itself, and a state file is one anyone with the account
 // could edit to point open at something else.
 const settingsLink = "x-apple.systempreferences:"
 
@@ -22,24 +22,35 @@ var (
 	ErrRefusedLink = errors.New("mtm opens only System Settings links")
 )
 
-// Checklist returns the steps finish left on this Mac, with what the user
-// did with each.
-func (a *App) Checklist() (checklist.List, error) {
-	st, err := stage.Existing(a.Home)
-	if err != nil {
-		return checklist.List{}, err
-	}
-	s, err := state.Load(st)
-	if err != nil {
-		return checklist.List{}, err
-	}
-	return s.Checklist, nil
+// Steps is one checklist kept in ~/.mtm, with what the user did with each
+// step: the new Mac's, or the old Mac's retirement steps.
+type Steps struct {
+	app  *App
+	file string
 }
 
-func (a *App) MarkDone(ids ...string) error {
-	return a.updateChecklist(func(l *checklist.List) error {
+// Checklist is the new Mac's checklist, which finish and verify fill.
+func (a *App) Checklist() Steps { return Steps{app: a, file: state.FileName} }
+
+// Retirement is the old Mac's retirement checklist, which retire fills.
+func (a *App) Retirement() Steps { return Steps{app: a, file: state.RetireFileName} }
+
+func (s Steps) List() (checklist.List, error) {
+	st, err := stage.Existing(s.app.Home)
+	if err != nil {
+		return checklist.List{}, err
+	}
+	saved, err := state.LoadFile(st, s.file)
+	if err != nil {
+		return checklist.List{}, err
+	}
+	return saved.Checklist, nil
+}
+
+func (s Steps) Done(ids ...string) error {
+	return s.update(func(l *checklist.List) error {
 		for _, id := range ids {
-			if err := l.Done(id, a.Now()); err != nil {
+			if err := l.Done(id, s.app.Now()); err != nil {
 				return err
 			}
 		}
@@ -47,28 +58,28 @@ func (a *App) MarkDone(ids ...string) error {
 	})
 }
 
-func (a *App) Skip(id, reason string) error {
-	return a.updateChecklist(func(l *checklist.List) error { return l.Skip(id, reason, a.Now()) })
+func (s Steps) Skip(id, reason string) error {
+	return s.update(func(l *checklist.List) error { return l.Skip(id, reason, s.app.Now()) })
 }
 
-func (a *App) updateChecklist(change func(*checklist.List) error) error {
-	st, err := stage.Existing(a.Home)
+func (s Steps) update(change func(*checklist.List) error) error {
+	st, err := stage.Existing(s.app.Home)
 	if err != nil {
 		return err
 	}
-	s, err := state.Load(st)
+	saved, err := state.LoadFile(st, s.file)
 	if err != nil {
 		return err
 	}
-	if err := change(&s.Checklist); err != nil {
+	if err := change(&saved.Checklist); err != nil {
 		return err
 	}
-	return state.Save(st, s)
+	return state.SaveFile(st, s.file, saved)
 }
 
-// OpenStep opens the System Settings pane a step happens in.
-func (a *App) OpenStep(ctx context.Context, id string) error {
-	l, err := a.Checklist()
+// Open opens the System Settings pane a step happens in.
+func (s Steps) Open(ctx context.Context, id string) error {
+	l, err := s.List()
 	if err != nil {
 		return err
 	}
@@ -82,7 +93,7 @@ func (a *App) OpenStep(ctx context.Context, id string) error {
 	if !strings.HasPrefix(e.Link, settingsLink) {
 		return fmt.Errorf("%w; refusing %q", ErrRefusedLink, e.Link)
 	}
-	if _, err := a.Runner.Run(ctx, runner.Command{Name: "/usr/bin/open", Args: []string{e.Link}}); err != nil {
+	if _, err := s.app.Runner.Run(ctx, runner.Command{Name: "/usr/bin/open", Args: []string{e.Link}}); err != nil {
 		return fmt.Errorf("open %q: %w", e.Where, err)
 	}
 	return nil

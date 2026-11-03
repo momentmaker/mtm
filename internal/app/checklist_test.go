@@ -76,7 +76,7 @@ func skip(t *testing.T, home, id, reason string, at time.Time) {
 	t.Helper()
 	a := stepApp(home, newUUID)
 	a.Now = func() time.Time { return at }
-	if err := a.Skip(id, reason); err != nil {
+	if err := a.Checklist().Skip(id, reason); err != nil {
 		t.Fatal(err)
 	}
 }
@@ -234,7 +234,7 @@ func TestFinishThatAddsAStepNeedsAnotherVerifyBeforeCleanup(t *testing.T) {
 	if _, err := a.Finish(ctx, FinishOptions{}); err != nil {
 		t.Fatal(err)
 	}
-	if err := a.Skip(licenseStep.ID, "sold the license"); err != nil {
+	if err := a.Checklist().Skip(licenseStep.ID, "sold the license"); err != nil {
 		t.Fatal(err)
 	}
 	if rep, err := a.Verify(ctx, VerifyOptions{}); err != nil || !rep.Verdict.Safe {

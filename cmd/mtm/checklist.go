@@ -25,23 +25,45 @@ var (
 )
 
 func cmdChecklist(ctx context.Context, a *app.App, args []string, stdout, stderr io.Writer) int {
+	return stepsCommand(ctx, stepList{report.ChecklistCommand, a.Checklist()}, args, stdout, stderr)
+}
+
+// stepList is a checklist and the mtm command that keeps it, which names
+// it in messages and hints.
+type stepList struct {
+	command string
+	steps   app.Steps
+}
+
+// fail prints a message as the command's own, such as "mtm retire done: …".
+func (s stepList) fail(stderr io.Writer, sub string, a ...any) {
+	name := "mtm " + s.command
+	if sub != "" {
+		name += " " + sub
+	}
+	fmt.Fprintln(stderr, append([]any{name + ":"}, a...)...)
+}
+
+// stepsCommand walks through the open steps in a terminal and lists them
+// elsewhere, or runs one of list, done, skip, and open.
+func stepsCommand(ctx context.Context, s stepList, args []string, stdout, stderr io.Writer) int {
 	if len(args) == 0 {
 		if interactive() {
-			return walk(ctx, a, stdin, stdout, stderr)
+			return walk(ctx, s, stdin, stdout, stderr)
 		}
-		return listSteps(a, nil, stdout, stderr)
+		return listSteps(s, nil, stdout, stderr)
 	}
 	switch args[0] {
 	case "list":
-		return listSteps(a, args[1:], stdout, stderr)
+		return listSteps(s, args[1:], stdout, stderr)
 	case "done":
-		return markDone(a, args[1:], stdout, stderr)
+		return markDone(s, args[1:], stdout, stderr)
 	case "skip":
-		return skipStep(a, args[1:], stdout, stderr)
+		return skipStep(s, args[1:], stdout, stderr)
 	case "open":
-		return openStep(ctx, a, args[1:], stderr)
+		return openStep(ctx, s, args[1:], stderr)
 	}
-	fmt.Fprintf(stderr, "mtm checklist: unknown subcommand %q\n\n%s", args[0], usage)
+	fmt.Fprintf(stderr, "mtm %s: unknown subcommand %q\n\n%s", s.command, args[0], usage)
 	return exitFailed
 }
 
@@ -61,17 +83,17 @@ func parse(flags *flag.FlagSet, args []string) ([]string, error) {
 	}
 }
 
-func listSteps(a *app.App, args []string, stdout, stderr io.Writer) int {
-	flags := flag.NewFlagSet("checklist list", flag.ContinueOnError)
+func listSteps(s stepList, args []string, stdout, stderr io.Writer) int {
+	flags := flag.NewFlagSet(s.command+" list", flag.ContinueOnError)
 	flags.SetOutput(stderr)
 	all := flags.Bool("all", false, "also show steps already done or skipped")
 	asJSON := flags.Bool("json", false, "print JSON")
 	if _, err := parse(flags, args); err != nil {
 		return exitFailed
 	}
-	l, err := a.Checklist()
+	l, err := s.steps.List()
 	if err != nil {
-		fmt.Fprintln(stderr, "mtm checklist:", err)
+		s.fail(stderr, "", err)
 		return exitFailed
 	}
 	if *asJSON {
@@ -79,30 +101,30 @@ func listSteps(a *app.App, args []string, stdout, stderr io.Writer) int {
 			l = checklist.List{Entries: l.Pending()}
 		}
 		if err := report.JSON(stdout, l); err != nil {
-			fmt.Fprintln(stderr, "mtm checklist:", err)
+			s.fail(stderr, "", err)
 			return exitFailed
 		}
 		return exitOK
 	}
-	report.Checklist(stdout, l, *all)
+	report.Checklist(stdout, l, *all, s.command)
 	return exitOK
 }
 
-func markDone(a *app.App, args []string, stdout, stderr io.Writer) int {
+func markDone(s stepList, args []string, stdout, stderr io.Writer) int {
 	if len(args) == 0 {
-		fmt.Fprintln(stderr, "mtm checklist done: name the step ids to mark done")
+		s.fail(stderr, "done", "name the step ids to mark done")
 		return exitFailed
 	}
-	if err := a.MarkDone(args...); err != nil {
-		fmt.Fprintln(stderr, "mtm checklist done:", err)
+	if err := s.steps.Done(args...); err != nil {
+		s.fail(stderr, "done", err)
 		return exitFailed
 	}
 	fmt.Fprintf(stdout, "Marked done: %s\n", strings.Join(args, ", "))
 	return exitOK
 }
 
-func skipStep(a *app.App, args []string, stdout, stderr io.Writer) int {
-	flags := flag.NewFlagSet("checklist skip", flag.ContinueOnError)
+func skipStep(s stepList, args []string, stdout, stderr io.Writer) int {
+	flags := flag.NewFlagSet(s.command+" skip", flag.ContinueOnError)
 	flags.SetOutput(stderr)
 	reason := flags.String("reason", "", "why this step doesn't apply (required)")
 	ids, err := parse(flags, args)
@@ -110,24 +132,24 @@ func skipStep(a *app.App, args []string, stdout, stderr io.Writer) int {
 		return exitFailed
 	}
 	if len(ids) != 1 {
-		fmt.Fprintln(stderr, `mtm checklist skip: name one step id, with --reason "..."`)
+		s.fail(stderr, "skip", `name one step id, with --reason "..."`)
 		return exitFailed
 	}
-	if err := a.Skip(ids[0], *reason); err != nil {
-		fmt.Fprintln(stderr, "mtm checklist skip:", err)
+	if err := s.steps.Skip(ids[0], *reason); err != nil {
+		s.fail(stderr, "skip", err)
 		return exitFailed
 	}
 	fmt.Fprintf(stdout, "Skipped: %s\n", ids[0])
 	return exitOK
 }
 
-func openStep(ctx context.Context, a *app.App, args []string, stderr io.Writer) int {
+func openStep(ctx context.Context, s stepList, args []string, stderr io.Writer) int {
 	if len(args) != 1 {
-		fmt.Fprintln(stderr, "mtm checklist open: name one step id")
+		s.fail(stderr, "open", "name one step id")
 		return exitFailed
 	}
-	if err := a.OpenStep(ctx, args[0]); err != nil {
-		fmt.Fprintln(stderr, "mtm checklist open:", err)
+	if err := s.steps.Open(ctx, args[0]); err != nil {
+		s.fail(stderr, "open", err)
 		if errors.Is(err, app.ErrRefusedLink) || errors.Is(err, app.ErrNoLink) {
 			return exitProblems
 		}
@@ -139,42 +161,42 @@ func openStep(ctx context.Context, a *app.App, args []string, stderr io.Writer) 
 // walk goes through the open steps one at a time: it opens each step's
 // System Settings pane and asks what happened, saving every answer at once
 // so quitting loses nothing.
-func walk(ctx context.Context, a *app.App, in io.Reader, stdout, stderr io.Writer) int {
-	l, err := a.Checklist()
+func walk(ctx context.Context, s stepList, in io.Reader, stdout, stderr io.Writer) int {
+	l, err := s.steps.List()
 	if err != nil {
-		fmt.Fprintln(stderr, "mtm checklist:", err)
+		s.fail(stderr, "", err)
 		return exitFailed
 	}
 	steps := l.Pending()
 	if len(steps) == 0 {
-		report.Checklist(stdout, l, false)
+		report.Checklist(stdout, l, false, s.command)
 		return exitOK
 	}
 	r := bufio.NewReader(in)
 	for i, e := range steps {
 		report.Step(stdout, i+1, len(steps), e)
 		if e.Link != "" {
-			if err := a.OpenStep(ctx, e.ID); err != nil {
+			if err := s.steps.Open(ctx, e.ID); err != nil {
 				fmt.Fprintln(stdout, "  Could not open it:", err)
 			}
 		}
-		if quit := ask(ctx, a, r, e, stdout); quit {
+		if quit := ask(ctx, s.steps, r, e, stdout); quit {
 			break
 		}
 	}
-	l, err = a.Checklist()
+	l, err = s.steps.List()
 	if err != nil {
-		fmt.Fprintln(stderr, "mtm checklist:", err)
+		s.fail(stderr, "", err)
 		return exitFailed
 	}
 	fmt.Fprintln(stdout)
-	report.Checklist(stdout, l, false)
+	report.Checklist(stdout, l, false, s.command)
 	return exitOK
 }
 
 // ask reads answers until one settles the step, and reports a quit or the
 // end of input.
-func ask(ctx context.Context, a *app.App, r *bufio.Reader, e checklist.Entry, out io.Writer) bool {
+func ask(ctx context.Context, steps app.Steps, r *bufio.Reader, e checklist.Entry, out io.Writer) bool {
 	for {
 		fmt.Fprint(out, "  [d]one, [s]kip, [l]ater, [q]uit? ")
 		answer, err := readLine(ctx, r)
@@ -183,7 +205,7 @@ func ask(ctx context.Context, a *app.App, r *bufio.Reader, e checklist.Entry, ou
 		}
 		switch strings.ToLower(answer) {
 		case "d", "done":
-			if err := a.MarkDone(e.ID); err != nil {
+			if err := steps.Done(e.ID); err != nil {
 				fmt.Fprintln(out, "  ", err)
 				continue
 			}
@@ -194,7 +216,7 @@ func ask(ctx context.Context, a *app.App, r *bufio.Reader, e checklist.Entry, ou
 			if err != nil {
 				return true
 			}
-			if err := a.Skip(e.ID, reason); err != nil {
+			if err := steps.Skip(e.ID, reason); err != nil {
 				fmt.Fprintln(out, "  ", err)
 				continue
 			}
