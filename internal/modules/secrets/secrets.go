@@ -274,7 +274,7 @@ func (m Module) Retire(env module.Env, _ *stage.Stage) (module.Retirement, error
 	return module.Retirement{Steps: []checklist.Item{{
 		ID: Name + ":retire-secure-enclave", Module: Name, Where: "GitHub > Settings > SSH and GPG keys, and each server's ~/.ssh/authorized_keys",
 		Title:  "Remove this Mac's Secure Enclave SSH keys from GitHub and your servers",
-		Detail: "Do it once the new Mac's keys work. Remove any passkey you made only on this Mac the same way, in each site's security settings.",
+		Detail: "Do it once the new Mac's keys work. Remove any passkey you made only on this Mac the same way, in each site's security settings. Keys on a hardware security key keep working; leave those." + hardwareKeys(inv.SSH),
 	}}}, nil
 }
 

@@ -66,6 +66,10 @@ type fixture struct {
 
 const bioutil = "/usr/bin/bioutil -c"
 
+// Spelled out, so a change to the arguments mtm gives gpg fails the tests
+// instead of being followed by them.
+const gpgListArgsLiteral = " --batch --no-tty --no-auto-check-trustdb --with-colons --list-secret-keys"
+
 // newFixture is a home folder with three SSH keys, an SSH config that
 // uses 1Password's agent, a GnuPG folder, and a gpg that lists two keys.
 // The gpg is a placeholder file the fake answers for.
@@ -77,8 +81,8 @@ func newFixture(t *testing.T) *fixture {
 	testutil.WriteFile(t, gpg, "")
 	f.mod = Module{Catalog: testCatalog(t), Getenv: func(k string) string { return f.env[k] }, GPG: []string{filepath.Join(root, "none", "gpg"), gpg}}
 	f.fake = &runner.Fake{Responses: map[string]runner.Response{
-		gpg + " " + strings.Join(gpgListArgs, " "): {Stdout: secretKeys},
-		bioutil: {Stdout: "User 501:\t2 biometric template(s)\nOperation performed successfully.\n"},
+		gpg + gpgListArgsLiteral: {Stdout: secretKeys},
+		bioutil:                  {Stdout: "User 501:\t2 biometric template(s)\nOperation performed successfully.\n"},
 	}}
 	ssh := filepath.Join(f.home, ".ssh")
 	testutil.WriteFile(t, filepath.Join(ssh, "id_ed25519"), "private")
@@ -340,7 +344,7 @@ func TestVerifyFailsMissingOrReplacedSSHKeys(t *testing.T) {
 
 func TestVerifyFailsAMissingGPGSecretKey(t *testing.T) {
 	f, m := migrated(t)
-	gpg := f.mod.GPG[1] + " " + strings.Join(gpgListArgs, " ")
+	gpg := f.mod.GPG[1] + gpgListArgsLiteral
 	f.fake.Responses[gpg] = runner.Response{Stdout: strings.Replace(secretKeys, ":+:::23::0:", ":#:::23::0:", 1)}
 	checks, err := f.mod.Verify(f.moduleEnv(m), nil)
 	if err != nil {
@@ -418,5 +422,8 @@ func TestRetireAsksToRemoveSecureEnclaveKeysOnlyWhenThereAreSome(t *testing.T) {
 	}
 	if got := stepIDs(r.Steps); !slices.Equal(got, []string{"secrets:retire-secure-enclave"}) {
 		t.Errorf("steps = %q, want the Secure Enclave key removal", got)
+	}
+	if d := r.Steps[0].Detail; !strings.Contains(d, "Keys on a hardware security key keep working") || !strings.Contains(d, "~/.ssh/id_ecdsa_sk_rk") {
+		t.Errorf("detail = %q, want the hardware-key caveat naming the key", d)
 	}
 }
