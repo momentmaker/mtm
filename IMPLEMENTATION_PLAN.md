@@ -148,15 +148,17 @@ Found while planning.
 - **Real-run validation pending:**
   - Arc's Safe Storage item name, and the Bitwarden and Secretive agent sockets in the catalog, haven't been checked against real installs;
   - Firefox is tested only with fixture files;
-  - the gpg fixtures were written from GnuPG's documented colon format: a scratch GnuPG folder's path was too long for gpg-agent's socket.
-- **Safe Storage is checked for presence only.** A browser that made a new key on the new Mac passes, though the old Mac's passwords and cookies can't be decrypted with it. Comparing the keys would mean reading them.
+  - the gpg fixtures were written from GnuPG's documented colon format: a scratch GnuPG folder's path was too long for gpg-agent's socket;
+  - whether prepare's gpg listing writes into `~/.gnupg` (trust database, keyring) after the files walk, so that retire lists mtm's own writes as changes.
+- **Safe Storage is checked for presence only.** A browser that made a new key on the new Mac passes, though the old Mac's passwords and cookies can't be decrypted with it. Comparing the keys would mean reading them. Comparing the item's creation date (`cdat`), which `security` prints without `-g`, could close this without reading the key; it needs checking on a real Mac.
 - **SSH agents:** `Include` files in `~/.ssh/config` aren't followed, and only the terminal's `SSH_AUTH_SOCK` is seen.
 - **An `sk-` key can be on a security key, which moves, or in the Secure Enclave, which doesn't.** mtm can't tell which, so its step covers both.
 - **retire:**
   - it lists only home-folder changes, not data elsewhere, such as Postgres in `/opt/homebrew/var` or Docker volumes, if services or containers ran again after `prepare`;
   - it can't tell a change Migration Assistant already copied from one made after it;
   - a file changed inside a folder `prepare` couldn't read isn't listed, since nothing in it was recorded;
-  - a step a newer catalog adds lands after the erase step.
+  - a step a newer catalog adds lands after the erase step;
+  - it exits 1 whenever shell history changed, which running it in a shell with shared history does.
 - **Touch ID's count** comes from `bioutil`'s text output. If the format changes, the count is unknown and the step is listed anyway.
 
 ## Stage 5: Ship

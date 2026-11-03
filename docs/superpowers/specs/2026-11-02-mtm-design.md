@@ -127,7 +127,7 @@ The checklist covers:
 - removing the old Mac's Secure Enclave SSH keys and passkeys from GitHub and servers once their replacements work;
 - "Erase All Content and Settings", which destroys the disk encryption key.
 
-The steps live in `~/.mtm/retire.json`, apart from the new Mac's `state.json`, so a step closed on the old Mac never counts toward the new Mac's verdict, even if Migration Assistant runs again. `retire` runs only on the Mac that ran `prepare`. It exits `1` when a module fails or a file outside `~/Library` changed; app state inside `~/Library` changes all the time, so it is listed as info.
+The steps live in `~/.mtm/retire.json`, apart from the new Mac's `state.json`, so a step closed on the old Mac never counts toward the new Mac's verdict, even if Migration Assistant runs again. `retire` runs only on the Mac that ran `prepare`. A module `prepare` didn't record is reported as a problem, so `retire` never says nothing changed when it didn't look. It exits `1` when a module fails or a file outside `~/Library` changed; app state inside `~/Library` changes all the time, so it is listed as info.
 
 ### 6.6 Supply chain
 - Go with the standard library. The only third-party dependency is `github.com/BurntSushi/toml` (no transitive dependencies) for the catalog.
@@ -278,7 +278,7 @@ Otherwise **NOT SAFE TO WIPE**, followed by the blocking items. Exit codes: `0` 
 ### 9.1 `files`
 - `prepare` walks the home folder and writes `files.jsonl.gz` (section 8).
 - `verify` walks the same roots on the new Mac and applies section 8.4.
-- `retire` walks the old Mac's home folder again alongside the record, which is in the same walk order, so memory stays bounded. It lists files that differ from the record in type, size, time, or link target, and files the record doesn't have, even with an old time, as a copy from a drive keeps. Groups are those of section 8.4. Changes outside `~/Library` are warnings, those inside it info. Deleted files, folders, cloud-only files, volatile paths, and paths `prepare` couldn't read, with everything inside such a folder, aren't listed: there is nothing to compare them with. A path that can no longer be read is listed.
+- `retire` walks the old Mac's home folder again alongside the record, which is in the same walk order, so memory stays bounded. It lists files that differ from the record in type, size, time, or link target, and files the record doesn't have, even with an old time, as a copy from a drive keeps. Groups are those of section 8.4. Changes outside `~/Library` are warnings, those inside it info. Deleted files, folders, cloud-only files, volatile paths, and paths `prepare` couldn't read, with everything inside such a folder, aren't listed: there is nothing to compare them with. The same goes for a folder that was cloud-only or on another volume at `prepare`. A path that can no longer be read is listed.
 - Fingerprinting streams with a bounded worker pool.
 
 ### 9.2 `git`
@@ -427,6 +427,7 @@ Otherwise **NOT SAFE TO WIPE**, followed by the blocking items. Exit codes: `0` 
 - **Firefox:** profiles from `profiles.ini`, and the ids of the extensions the user installed, from each profile's `extensions.json`.
 - **Safari:** relies on iCloud sync. Records only whether Safari data was readable.
 - A browser without `Local State` or `profiles.ini` has never run and isn't recorded. A profile list `mtm` can't read is a warning, and verify doesn't check that browser. Profile entries that point outside the browser's folder are ignored.
+- A browser whose profile list can't be read gets a checklist step to check it by hand, and an info check. An absolute Firefox profile path inside the Firefox folder is recorded relative to it.
 - **Checklist steps** (section 7.3): per Chromium browser, sign in to Google again, naming the profiles to do it in; per browser, check that the sites used most are still signed in.
 - **`verify`:**
   - each recorded profile present: a critical fail otherwise, since the old Mac has the only other copy;
@@ -443,7 +444,7 @@ Identities are recorded, never key material.
 - **GPG keys:** `gpg --batch --no-tty --no-auto-check-trustdb --with-colons --list-secret-keys` gives each secret key's fingerprint, algorithm, creation date, and where its secret part is: here, on a card, or missing.
   - gpg runs only when a GnuPG folder (`$GNUPGHOME` or `~/.gnupg`) exists, since it would create one. Like any use of gpg, it may start gpg-agent.
   - mtm looks for gpg in `/opt/homebrew/bin`, `/usr/local/bin`, and `/usr/local/MacGPG2/bin`. Without it, `prepare` warns, and a checklist step asks the user to check with `gpg -K` on the new Mac.
-- **Secure Enclave keys** can't move, so `scan` and `prepare` warn about them. They are found from any of:
+- **Secure Enclave keys** can't move. `scan` and `prepare` warn when SSH uses them, from the first two signs below or a Secure Enclave agent; an installed Secure Enclave agent app alone adds only the new-Mac and retirement steps. The signs are:
   - `sk-` key types: a hardware security key, or the Secure Enclave through macOS's `/usr/lib/ssh-keychain.dylib`;
   - a `SecurityKeyProvider` in `~/.ssh/config`, or `SSH_SK_PROVIDER`, naming that library;
   - an SSH agent whose catalog `kind` is `secure-enclave-agent` (Secretive), or such an app in the `system` record.
