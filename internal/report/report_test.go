@@ -73,14 +73,14 @@ func TestFindingsPutsBlockersFirst(t *testing.T) {
 
 func TestPrepareReadyShowsNextSteps(t *testing.T) {
 	var out bytes.Buffer
-	Prepare(&out, true, []string{"files: recorded 3 items, 1 fingerprinted"}, nil)
+	Prepare(&out, true, []string{"files: recorded 3 items, 1 fingerprinted"}, nil, "")
 	for _, want := range []string{"READY FOR MIGRATION ASSISTANT", "not from a Time Machine backup", "mtm verify"} {
 		if !strings.Contains(out.String(), want) {
 			t.Errorf("output missing %q:\n%s", want, out.String())
 		}
 	}
 	var notReady bytes.Buffer
-	Prepare(&notReady, false, nil, []module.Finding{{Module: "git", Severity: module.SeverityBlocker, Title: "broken"}})
+	Prepare(&notReady, false, nil, []module.Finding{{Module: "git", Severity: module.SeverityBlocker, Title: "broken"}}, "")
 	if !strings.Contains(notReady.String(), "NOT READY FOR MIGRATION ASSISTANT") {
 		t.Errorf("not-ready output:\n%s", notReady.String())
 	}
@@ -146,7 +146,7 @@ func TestFindingsAndPrepareEscapeControlCharacters(t *testing.T) {
 		t.Errorf("scan output:\n%q", scan.String())
 	}
 	var prep bytes.Buffer
-	Prepare(&prep, false, []string{"files: recorded Icon\r"}, findings)
+	Prepare(&prep, false, []string{"files: recorded Icon\r"}, findings, "")
 	assertNoRawControls(t, prep.String())
 }
 
@@ -204,8 +204,21 @@ func TestUndoWithProblemsDoesNotClaimTheMacIsBackInUse(t *testing.T) {
 
 func TestReadyTextNamesFinish(t *testing.T) {
 	var out bytes.Buffer
-	Prepare(&out, true, nil, nil)
+	Prepare(&out, true, nil, nil, "")
 	if !strings.Contains(out.String(), "mtm finish, then mtm verify") {
 		t.Errorf("ready text:\n%s", out.String())
+	}
+}
+
+func TestPrepareReadyTellsAStageUserToKeepTheDrive(t *testing.T) {
+	line := "Keep the drive with mtm's exports (/Volumes/Backup/mtm-exports), and attach it to the new Mac before mtm finish."
+	var staged, plain bytes.Buffer
+	Prepare(&staged, true, nil, nil, "/Volumes/Backup/mtm-exports")
+	Prepare(&plain, true, nil, nil, "")
+	if !strings.Contains(staged.String(), line) || strings.Index(staged.String(), line) > strings.Index(staged.String(), "Next:") {
+		t.Errorf("staged output lacks the drive line before Next:\n%s", staged.String())
+	}
+	if strings.Contains(plain.String(), "Keep the drive") {
+		t.Errorf("output without --stage mentions the drive:\n%s", plain.String())
 	}
 }

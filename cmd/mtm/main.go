@@ -48,7 +48,7 @@ Usage:
                                             load the Postgres safety-net dump
   mtm verify [--only a,b] [--deep] [--details] [--json]
                                             check the new Mac against the record
-  mtm cleanup [--force]                     delete ~/.mtm after SAFE TO WIPE
+  mtm cleanup [--force]                     delete ~/.mtm, and the --stage exports, after SAFE TO WIPE
   mtm version
 `
 
@@ -163,7 +163,7 @@ func cmdPrepare(ctx context.Context, a *app.App, args []string, stdout, stderr i
 		fmt.Fprintln(stderr, "mtm prepare:", err)
 		return exitFailed
 	}
-	report.Prepare(stdout, rep.Ready, rep.Done, rep.Problems)
+	report.Prepare(stdout, rep.Ready, rep.Done, rep.Problems, rep.ExportsDir)
 	if !rep.Ready {
 		return exitProblems
 	}

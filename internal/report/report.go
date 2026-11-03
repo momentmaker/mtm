@@ -136,9 +136,9 @@ func writeFinding(w io.Writer, f module.Finding) {
 	}
 }
 
-const readyText = `READY FOR MIGRATION ASSISTANT
+const readyHeader = "READY FOR MIGRATION ASSISTANT\n\n"
 
-Next:
+const readyNext = `Next:
   1. Don't change anything on this Mac from now on. Changes made after prepare aren't checked.
   2. Turn on the new Mac. During its first-boot setup, choose to transfer from a Mac,
      not from a Time Machine backup. A Thunderbolt cable between the Macs is fastest.
@@ -169,7 +169,9 @@ func writeProblems(w io.Writer, title string, problems []module.Finding) {
 	fmt.Fprintln(w)
 }
 
-func Prepare(w io.Writer, ready bool, done []string, problems []module.Finding) {
+// Prepare prints the outcome of prepare. exportsDir is the --stage folder,
+// empty when the exports are under ~/.mtm.
+func Prepare(w io.Writer, ready bool, done []string, problems []module.Finding, exportsDir string) {
 	writeDone(w, done)
 	writeProblems(w, "Problems", problems)
 	if !ready {
@@ -177,7 +179,11 @@ func Prepare(w io.Writer, ready bool, done []string, problems []module.Finding) 
 		fmt.Fprintln(w, "Fix the problems marked ✗ and run mtm prepare again.")
 		return
 	}
-	fmt.Fprint(w, readyText)
+	fmt.Fprint(w, readyHeader)
+	if exportsDir != "" {
+		fmt.Fprintf(w, "Keep the drive with mtm's exports (%s), and attach it to the new Mac before mtm finish.\n\n", clean(exportsDir))
+	}
+	fmt.Fprint(w, readyNext)
 }
 
 // Finish prints what finish did and what is left to do by hand.

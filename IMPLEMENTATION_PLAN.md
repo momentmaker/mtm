@@ -65,7 +65,32 @@ Found in the final review and its re-review.
 **Ordering**: the `databases` module must come before `homebrew` in the module list. Its `pg_dumpall` needs Postgres running, and `homebrew` stops the service during `prepare`.
 **Tests**: `integration`-tagged Docker and Postgres tests; unit tests for the content digest and the free-space and encrypted-volume checks.
 **Plan**: `docs/superpowers/plans/2026-11-02-mtm-stage3-docker-postgres.md`
-**Status**: Not Started
+**Status**: Complete
+
+### Known gaps carried out of Stage 3
+Found in the final review.
+- **Real-run validation pending.**
+  - `prepare --stage` has not run on a real encrypted external drive.
+  - The docker module's prepare and finish have run only against fakes. The real-engine tests cover `mtm-test` round trips.
+  - The Postgres integration test has never run: there is no Homebrew Postgres on the author's Mac.
+- **Docker:**
+  - Data written inside containers, outside any volume, isn't exported or checked.
+  - Volume archive names can collide on a case-insensitive volume (`Data` and `data`).
+  - A `--stage` drive that mounts under another name can't be found by `finish`; there is no `finish --stage`.
+  - Printed `mtm prepare --only …` fixes omit `--stage`.
+  - `docker compose up` may fetch remote `include:` or `extends:` resources.
+  - Stale archives from earlier runs aren't removed.
+  - Volumes mtm can't export are reported only by scan.
+  - A stream cut exactly at a tar block boundary digests cleanly; this relies on docker cp's exit status.
+  - A settlement in `docker-finish.json` isn't tied to the record's identity.
+  - verify fails without Docker Desktop even when nothing was recorded.
+- **Postgres:**
+  - `PGPASSFILE=/dev/null` makes libpq warn on every connection.
+  - Database names with spaces are split.
+  - A connection failure in verify (password auth, a renamed account) has no fix text.
+  - Scan's space check ignores dump sizes.
+  - A failed psql load's stderr still reaches the log.
+- **Free space** comes from statfs `f_bavail`, which leaves out APFS purgeable space.
 
 ## Stage 4: Manual steps and `retire`
 **Goal**: the TOML app catalog (seeded from `tape`, BSD-2), the `checklist` engine and `mtm checklist` (done, skip with reason, persisted in `state.json`, System Settings deep links), the `permissions`, `browsers`, and `secrets` modules, and `mtm retire` (changes on the old Mac since `prepare`, plus the retirement checklist). The verdict starts counting open checklist items.
