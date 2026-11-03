@@ -142,9 +142,9 @@ func TestNoNetwork(t *testing.T) {
 		catalogFallback bool
 	}{
 		{[]string{"scan"}, []int{0, 1}, false, true},
-		{[]string{"prepare", "--only", "files,git,system,databases,docker,homebrew,toolchains,permissions"}, []int{0, 1}, true, true},
+		{[]string{"prepare", "--only", "files,git,system,databases,docker,homebrew,toolchains,permissions,browsers"}, []int{0, 1}, true, true},
 		{[]string{"prepare", "--undo"}, []int{0, 1}, false, false},
-		{[]string{"prepare", "--only", "files,git,system,databases,docker,homebrew,toolchains,permissions"}, []int{0, 1}, true, true},
+		{[]string{"prepare", "--only", "files,git,system,databases,docker,homebrew,toolchains,permissions,browsers"}, []int{0, 1}, true, true},
 		{[]string{"verify"}, []int{1}, false, false},
 	}
 	for _, s := range steps {

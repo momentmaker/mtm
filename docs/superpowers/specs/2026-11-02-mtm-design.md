@@ -264,7 +264,7 @@ Files on the new Mac that are not in the record are ignored. Reports group resul
 ### 8.5 Verdict
 **SAFE TO WIPE** requires all of:
 1. No check in any module has status `fail`. This includes the preflight checks: FileVault is on, and `verify` is running on a different Mac from the one that ran `prepare` (compared by machine id).
-2. Every check marked critical has status `pass`, not `warn` or `info`. Critical checks are those from `git`, `secrets` identities, `docker` volumes, `databases`, and `critical`-area files.
+2. Every check marked critical has status `pass`, not `warn` or `info`. Critical checks are those from `git`, `secrets` identities, `docker` volumes, `databases`, `browsers` profiles and Safe Storage keys, and `critical`-area files.
 3. Every checklist item is either done or skipped with a recorded reason (`mtm checklist skip <id> --reason "..."`).
 
 Otherwise **NOT SAFE TO WIPE**, followed by the blocking items. Exit codes: `0` safe, `1` not safe, `2` `mtm` itself failed. The other commands use `0` success, `1` completed with problems (such as NOT READY), and `2` `mtm` failed.
@@ -417,12 +417,17 @@ Otherwise **NOT SAFE TO WIPE**, followed by the blocking items. Exit codes: `0` 
 
 ### 9.9 `browsers`
 - **Chromium family (Chrome, Brave, Arc):**
-  - records profile names from `Local State` and extension ids per profile;
-  - records whether the browser's "Safe Storage" keychain item exists (presence only, section 6.2).
-- **Firefox:** profiles from `profiles.ini` and extension ids.
+  - records each profile's folder and the name the browser shows for it, from `Local State`, and the extension ids in each profile's `Extensions` folder. `Local State` also holds account details, which `mtm` doesn't record;
+  - records whether the browser's "Safe Storage" keychain item exists (presence only, section 6.2): `security find-generic-password -s "<Browser> Safe Storage"`, which exits 44 when there is none. The item holds the key that encrypts the browser's saved passwords and cookies.
+- **Firefox:** profiles from `profiles.ini`, and the ids of the extensions the user installed, from each profile's `extensions.json`.
 - **Safari:** relies on iCloud sync. Records only whether Safari data was readable.
-- `finish` adds checklist items: sign in to Google again in each Chromium profile, and confirm two or three named sites are still logged in.
-- `verify`: profiles and extensions present, and each Safe Storage item present.
+- A browser without `Local State` or `profiles.ini` has never run and isn't recorded. A profile list `mtm` can't read is a warning, and verify doesn't check that browser. Profile entries that point outside the browser's folder are ignored.
+- **Checklist steps** (section 7.3): per Chromium browser, sign in to Google again, naming the profiles to do it in; per browser, check that the sites used most are still signed in.
+- **`verify`:**
+  - each recorded profile present: a critical fail otherwise, since the old Mac has the only other copy;
+  - each extension present: a warn otherwise, since the extension store has it;
+  - each recorded Safe Storage item present: a critical fail otherwise, with how to copy it from the old Mac's Keychain Access. Without it the copied passwords and cookies can't be decrypted;
+  - Safari: an info check.
 
 ### 9.10 `secrets`
 - Records `~/.ssh` key names and types (`ssh-keygen -l` on public keys), and `gpg --list-secret-keys` identities (never key material).
