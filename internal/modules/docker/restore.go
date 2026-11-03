@@ -195,8 +195,16 @@ func (m Module) settle(env module.Env, v Volume, exists bool) (string, *module.F
 // never overwrites it (spec 6.2, rule 4): the user removes it, and finish
 // then restores it like any missing volume.
 func (m Module) differs(env module.Env, v Volume) *module.Finding {
+	if err := usableExport(env, v); err != nil {
+		return &module.Finding{
+			Module: Name, ID: "volume:" + v.Name, Severity: module.SeverityBlocker, Handler: module.Manual,
+			Title:  "Volume " + v.Name + " holds different data from the old Mac's, and its export can't be used",
+			Detail: err.Error(),
+			Fix:    "Don't delete this volume. " + restoreFix,
+		}
+	}
 	var steps []string
-	detail := "mtm never overwrites a volume that holds data. These commands delete it and the containers using it; finish then restores it from the old Mac's export and re-creates the Compose containers."
+	detail := "mtm never overwrites a volume that holds data. These commands delete it and the containers using it; finish then restores it from the old Mac's export and re-creates the Compose containers. If you used this volume on the old Mac after mtm prepare, this Mac's copy may be newer than the export; check before you delete it."
 	if cs, err := m.containers(env); err != nil {
 		detail += " mtm couldn't list the containers using the volume (" + err.Error() + "); remove them first, or docker volume rm will fail."
 	} else {
@@ -219,14 +227,20 @@ func (m Module) differs(env module.Env, v Volume) *module.Finding {
 	}
 }
 
+// usableExport reports why finish couldn't restore v, so differs doesn't
+// offer to delete a volume whose replacement is missing or damaged.
+func usableExport(env module.Env, v Volume) error {
+	if v.Archive == nil {
+		return errors.New("prepare saved no archive of it")
+	}
+	return env.Exports.CheckArtifact(*v.Archive)
+}
+
 // restore fills a missing or empty volume from its archive, once the
 // archive matches its fingerprint, and checks the result against the
 // record.
 func (m Module) restore(env module.Env, v Volume, create bool) error {
-	if v.Archive == nil {
-		return errors.New("prepare saved no archive of it")
-	}
-	if err := env.Exports.CheckArtifact(*v.Archive); err != nil {
+	if err := usableExport(env, v); err != nil {
 		return err
 	}
 	if create {
@@ -408,8 +422,11 @@ func (m Module) startContainers(env module.Env, stopped []Container) (module.Res
 func (m Module) composeUp(env module.Env, c Container) module.Result {
 	dir := expandHome(env.Home, c.WorkingDir)
 	args := []string{"compose", "--project-name", c.Project, "--project-directory", dir}
+	manual := []string{"docker", "compose", "--project-name", macos.ShellQuote(c.Project), "--project-directory", macos.ShellQuote(dir)}
 	for _, f := range c.ConfigFiles {
-		args = append(args, "--file", expandHome(env.Home, f))
+		file := expandHome(env.Home, f)
+		args = append(args, "--file", file)
+		manual = append(manual, "--file", macos.ShellQuote(file))
 	}
 	cmd := m.command(env, append(args, "up", "--detach", "--pull", "never", "--no-build")...)
 	cmd.Dir = dir
@@ -417,7 +434,7 @@ func (m Module) composeUp(env module.Env, c Container) module.Result {
 		return module.Result{Problems: []module.Finding{{
 			Module: Name, ID: "compose:" + c.Project, Severity: module.SeverityWarn, Handler: module.Manual,
 			Title: "Could not start Compose project " + c.Project, Detail: err.Error(),
-			Fix: "Pull any missing images, then run: cd " + macos.ShellQuote(dir) + " && docker compose -p " + macos.ShellQuote(c.Project) + " up -d",
+			Fix: "Pull any missing images, then run: cd " + macos.ShellQuote(dir) + " && " + strings.Join(manual, " ") + " up -d",
 		}}}
 	}
 	return module.Result{Done: []string{"started Compose project " + c.Project}}

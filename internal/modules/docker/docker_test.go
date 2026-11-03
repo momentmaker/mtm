@@ -14,6 +14,7 @@ import (
 	"github.com/momentmaker/mtm/internal/manifest"
 	"github.com/momentmaker/mtm/internal/module"
 	"github.com/momentmaker/mtm/internal/runner"
+	"github.com/momentmaker/mtm/internal/stage"
 )
 
 func record(t *testing.T, inv Inventory) *manifest.Manifest {
@@ -191,8 +192,8 @@ func TestPrepareChecksSpaceBeforeStoppingAnything(t *testing.T) {
 	w.oldMac()
 	w.free = 10_100_000_000
 	_, err := w.mod.Prepare(w.env(record(t, Inventory{})), w.st)
-	if err == nil || !strings.Contains(err.Error(), "don't fit") {
-		t.Errorf("err = %v, want the exports don't fit", err)
+	if err == nil || !strings.Contains(err.Error(), "don't fit") || !strings.Contains(err.Error(), "--stage") {
+		t.Errorf("err = %v, want the exports don't fit, with the --stage advice", err)
 	}
 	if w.ran("container stop --time 60 dbcontainer") {
 		t.Error("prepare stopped a container before finding the exports don't fit")
@@ -352,8 +353,8 @@ func TestPrepareBlocksOnAnAutoRemoveContainerBeforeStoppingAnything(t *testing.T
 	w.oldMac()
 	w.autoRemove()
 	_, err := w.mod.Prepare(w.env(record(t, Inventory{})), w.st)
-	if err == nil || !strings.Contains(err.Error(), "acme-db-1") {
-		t.Errorf("err = %v, want the --rm container named", err)
+	if err == nil || !strings.Contains(err.Error(), "acme-db-1") || !strings.Contains(err.Error(), "stop it yourself") {
+		t.Errorf("err = %v, want the --rm container named, with its fix", err)
 	}
 	for _, c := range w.fake.Calls() {
 		if strings.Contains(c.String(), "container stop") {
@@ -413,5 +414,52 @@ func TestPrepareRecordsVolumesWithoutDigestsWhenTheRelistFails(t *testing.T) {
 		if strings.Contains(c.String(), "container create") {
 			t.Errorf("a holder was created: %q", c.String())
 		}
+	}
+}
+
+func TestPrepareBlocksWithStageAdviceWhenOneVolumeDoesNotFit(t *testing.T) {
+	w := newWorld(t)
+	w.oldMac()
+	env := w.env(record(t, Inventory{}))
+	calls := 0
+	env.Free = func(string) (uint64, error) {
+		calls++
+		if calls == 1 {
+			return w.free, nil
+		}
+		return 10_000_000_001, nil
+	}
+	res, err := w.mod.Prepare(env, w.st)
+	if err != nil {
+		t.Fatal(err)
+	}
+	f := find(res.Problems, "volume:cache")
+	if f.Severity != module.SeverityBlocker || f.Fix != spaceFix {
+		t.Errorf("volume finding = %+v, want a blocker with the --stage advice", f)
+	}
+}
+
+func TestPrepareBlocksWhenKeptArchivesAreNotInThisExportsFolder(t *testing.T) {
+	w := newWorld(t)
+	earlier := Inventory{Installed: true, Volumes: []Volume{{Name: "acme_pgdata", Archive: &stage.Artifact{Name: "docker/volumes/acme_pgdata.tar.gz", Size: 10, SHA256: "abc"}}}}
+	os.Remove(socket(w.home))
+	res, inv := w.prepare(record(t, earlier))
+	f := find(res.Problems, "kept")
+	if f.Severity != module.SeverityBlocker || !strings.Contains(f.Title, "aren't in this prepare's exports folder") || f.Fix != "Start Docker Desktop and run mtm prepare --only docker." {
+		t.Errorf("kept finding = %+v, want a blocker", f)
+	}
+	if !reflect.DeepEqual(inv, earlier) {
+		t.Errorf("inventory = %+v, want the earlier one kept", inv)
+	}
+}
+
+func TestPrepareKeepsIntactArchivesWithAWarningWhileDockerIsNotRunning(t *testing.T) {
+	w := newWorld(t)
+	w.oldMac()
+	_, first := w.prepare(record(t, Inventory{}))
+	os.Remove(socket(w.home))
+	res, _ := w.prepare(record(t, first))
+	if f := find(res.Problems, "kept"); f.Severity != module.SeverityWarn {
+		t.Errorf("kept finding = %+v, want a warning", f)
 	}
 }

@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/momentmaker/mtm/internal/macos"
 	"github.com/momentmaker/mtm/internal/manifest"
 	"github.com/momentmaker/mtm/internal/module"
 	"github.com/momentmaker/mtm/internal/preflight"
@@ -57,6 +58,9 @@ type PrepareReport struct {
 	Ready    bool             `json:"ready"`
 	Done     []string         `json:"done"`
 	Problems []module.Finding `json:"problems"`
+	// ExportsDir is the --stage folder holding this run's exports, or empty
+	// when they are under ~/.mtm.
+	ExportsDir string `json:"exports_dir,omitempty"`
 }
 
 type VerifyOptions struct {
@@ -162,9 +166,13 @@ func (a *App) Prepare(ctx context.Context, opts PrepareOptions) (PrepareReport, 
 	m.MtmVersion = a.Version
 	m.MacOSVersion, m.MacOSBuild, m.MachineID = info.MacOSVersion, info.MacOSBuild, info.MachineID
 	m.Hostname, _ = os.Hostname()
+	oldExports := m.ExportsDir
 	m.ExportsDir = ""
 	if opts.StageDir != "" {
 		m.ExportsDir = exports.Root
+	}
+	if len(opts.Only) == 0 && oldExports != "" && oldExports != m.ExportsDir {
+		rep.Problems = append(rep.Problems, abandonedExports(oldExports))
 	}
 
 	startedAt := a.Now()
@@ -190,7 +198,19 @@ func (a *App) Prepare(ctx context.Context, opts PrepareOptions) (PrepareReport, 
 		return rep, err
 	}
 	rep.Ready = !module.HasBlocker(rep.Problems)
+	rep.ExportsDir = m.ExportsDir
 	return rep, nil
+}
+
+// abandonedExports warns that a full prepare stopped using an earlier
+// --stage folder. The record can name only one folder, so cleanup will not
+// delete the old one.
+func abandonedExports(old string) module.Finding {
+	return module.Finding{
+		Module: "stage", ID: "old-exports", Severity: module.SeverityWarn, Handler: module.Manual,
+		Title: "This prepare doesn't use the earlier exports in " + old,
+		Fix:   "Delete " + macos.ShellQuote(old) + " yourself when that drive is attached; mtm cleanup won't.",
+	}
 }
 
 func (a *App) Verify(ctx context.Context, opts VerifyOptions) (VerifyReport, error) {

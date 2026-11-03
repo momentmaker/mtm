@@ -237,3 +237,38 @@ func TestCleanupDeletesOnlyAFolderMtmMade(t *testing.T) {
 		t.Errorf("cleanup deleted %s: %v", other.Root, err)
 	}
 }
+
+func TestFullPrepareThatDropsTheStageFolderWarnsAboutIt(t *testing.T) {
+	home, dir := t.TempDir(), t.TempDir()
+	var seen module.Env
+	a := &App{Runner: stagingMac(t, home, dir, "true"), Home: home, Version: "test", Now: time.Now, Modules: []module.Module{exportModule{&seen}}}
+	if rep, err := a.Prepare(ctx, PrepareOptions{StageDir: dir}); err != nil || !rep.Ready {
+		t.Fatalf("prepare --stage = %+v, %v", rep, err)
+	}
+	rep, err := a.Prepare(ctx, PrepareOptions{})
+	if err != nil || !rep.Ready {
+		t.Fatalf("full prepare = %+v, %v; want READY with a warning", rep, err)
+	}
+	old := filepath.Join(dir, stage.ExternalDirName)
+	if got := loadManifest(t, home).ExportsDir; got != "" {
+		t.Errorf("ExportsDir = %q, want empty", got)
+	}
+	if !slices.ContainsFunc(rep.Problems, func(f module.Finding) bool {
+		return f.ID == "old-exports" && f.Severity == module.SeverityWarn && strings.Contains(f.Title, old)
+	}) {
+		t.Errorf("problems = %+v, want an old-exports warning naming %s", rep.Problems, old)
+	}
+	if rep.ExportsDir != "" {
+		t.Errorf("report ExportsDir = %q, want empty", rep.ExportsDir)
+	}
+}
+
+func TestPrepareStageReportsTheExportsFolder(t *testing.T) {
+	home, dir := t.TempDir(), t.TempDir()
+	var seen module.Env
+	a := &App{Runner: stagingMac(t, home, dir, "true"), Home: home, Version: "test", Now: time.Now, Modules: []module.Module{exportModule{&seen}}}
+	rep, err := a.Prepare(ctx, PrepareOptions{StageDir: dir})
+	if err != nil || rep.ExportsDir != filepath.Join(dir, stage.ExternalDirName) {
+		t.Errorf("ExportsDir = %q, %v", rep.ExportsDir, err)
+	}
+}

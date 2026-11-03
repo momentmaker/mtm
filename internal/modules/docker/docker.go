@@ -172,11 +172,7 @@ func (m Module) Prepare(env module.Env, _ *stage.Stage) (module.Result, error) {
 	recorded := err == nil && previous.Installed
 	engine := m.engine(env)
 	if engine == "" {
-		return keepPrevious(previous, recorded, module.Finding{
-			Module: Name, ID: "kept", Severity: module.SeverityWarn, Handler: module.Manual,
-			Title: "Docker Desktop isn't running, so mtm kept the Docker export from the earlier prepare",
-			Fix:   "If you used Docker since then, start Docker Desktop and run mtm prepare --only docker.",
-		}, "Docker Desktop isn't running. Start it and run: mtm prepare --only docker")
+		return keepPrevious(previous, recorded, m.keptProblem(env, previous), "Docker Desktop isn't running. Start it and run: mtm prepare --only docker")
 	}
 	if err := m.removeLeftovers(env); err != nil {
 		return keepPrevious(previous, recorded, blocker("list", "Could not list Docker's containers", err), "")
@@ -241,7 +237,7 @@ func (m Module) Prepare(env module.Env, _ *stage.Stage) (module.Result, error) {
 		exported, err := m.exportVolume(env, v)
 		if err != nil {
 			inv.Volumes = append(inv.Volumes, v)
-			res.Problems = append(res.Problems, blocker("volume:"+v.Name, "Could not export volume "+v.Name, err))
+			res.Problems = append(res.Problems, exportBlocker("volume:"+v.Name, "Could not export volume "+v.Name, err))
 			continue
 		}
 		inv.Volumes = append(inv.Volumes, exported)
@@ -262,6 +258,39 @@ func (m Module) Prepare(env module.Env, _ *stage.Stage) (module.Result, error) {
 	res.Problems = append(res.Problems, quitDocker)
 	res.Inventory = inv
 	return res, nil
+}
+
+// keptProblem is what a prepare without Docker Desktop reports about
+// keeping the earlier record. A kept archive that is not in this run's
+// exports folder is a blocker: a full prepare that changed or dropped
+// --stage would otherwise keep archives that restore can't find.
+func (m Module) keptProblem(env module.Env, previous Inventory) module.Finding {
+	if keptArchivesIntact(env, previous) {
+		return module.Finding{
+			Module: Name, ID: "kept", Severity: module.SeverityWarn, Handler: module.Manual,
+			Title: "Docker Desktop isn't running, so mtm kept the Docker export from the earlier prepare",
+			Fix:   "If you used Docker since then, start Docker Desktop and run mtm prepare --only docker.",
+		}
+	}
+	return module.Finding{
+		Module: Name, ID: "kept", Severity: module.SeverityBlocker, Handler: module.Manual,
+		Title: "Docker Desktop isn't running, and the earlier Docker exports aren't in this prepare's exports folder",
+		Fix:   "Start Docker Desktop and run mtm prepare --only docker.",
+	}
+}
+
+func keptArchivesIntact(env module.Env, previous Inventory) bool {
+	for _, v := range previous.Volumes {
+		if v.Archive != nil && env.Exports.CheckArtifact(*v.Archive) != nil {
+			return false
+		}
+	}
+	for _, img := range previous.Images {
+		if img.Archive != nil && env.Exports.CheckArtifact(*img.Archive) != nil {
+			return false
+		}
+	}
+	return true
 }
 
 func autoRemoving(cs []container) []string {
@@ -299,6 +328,16 @@ func blocker(id, title string, err error) module.Finding {
 	}
 }
 
+// exportBlocker is blocker with the --stage advice when the archive didn't
+// fit, so the user isn't told to simply run prepare again.
+func exportBlocker(id, title string, err error) module.Finding {
+	f := blocker(id, title, err)
+	if errors.Is(err, stage.ErrNoRoom) {
+		f.Fix = spaceFix
+	}
+	return f
+}
+
 // keepPrevious ends prepare with problem but keeps the earlier record, so
 // finish still starts the containers an earlier run stopped. Without an
 // earlier record it fails instead, with failure when given: an empty
@@ -306,7 +345,7 @@ func blocker(id, title string, err error) module.Finding {
 func keepPrevious(previous Inventory, recorded bool, problem module.Finding, failure string) (module.Result, error) {
 	if !recorded {
 		if failure == "" {
-			failure = problem.Title + ": " + problem.Detail
+			failure = problem.Title + ": " + problem.Detail + ". " + problem.Fix
 		}
 		return module.Result{}, errors.New(failure)
 	}
@@ -420,7 +459,7 @@ func (m Module) saveImages(env module.Env, images []Image, kept map[string]*stag
 		default:
 			a, err := m.saveImage(env, img)
 			if err != nil {
-				problems = append(problems, blocker("image:"+img.Tags[0], "Could not save image "+img.Tags[0], err))
+				problems = append(problems, exportBlocker("image:"+img.Tags[0], "Could not save image "+img.Tags[0], err))
 				break
 			}
 			img.Archive = &a

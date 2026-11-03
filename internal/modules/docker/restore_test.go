@@ -355,3 +355,38 @@ func TestFinishSaysWhenItCouldntListTheContainersUsingAVolume(t *testing.T) {
 		t.Errorf("detail = %q", p.Detail)
 	}
 }
+
+func TestFinishOffersNoDeleteWhenTheDifferingVolumesExportIsDamaged(t *testing.T) {
+	w, m := migrated(t)
+	other := volumeTar(t, root, entry{name: "vol/PG_VERSION", typ: tar.TypeReg, mode: 0o600, uid: 70, content: "17\n"})
+	w.respond("container cp holder-pgdata:/vol -", runner.Response{Stdout: string(other)})
+	os.WriteFile(w.exports.Path("docker/volumes/acme_pgdata.tar.gz"), []byte("tampered"), 0o600)
+	p := find(w.finish(m).Problems, "volume:acme_pgdata")
+	if p.Severity != module.SeverityBlocker || !strings.Contains(p.Title, "its export can't be used") || !strings.HasPrefix(p.Fix, "Don't delete this volume. ") || strings.Contains(p.Fix, "volume rm") {
+		t.Errorf("problem = %+v, want a blocker that offers no delete", p)
+	}
+}
+
+func TestFinishWarnsThatTheNewMacsVolumeMayBeNewer(t *testing.T) {
+	w, m := migrated(t)
+	other := volumeTar(t, root, entry{name: "vol/PG_VERSION", typ: tar.TypeReg, mode: 0o600, uid: 70, content: "17\n"})
+	w.respond("container cp holder-pgdata:/vol -", runner.Response{Stdout: string(other)})
+	if p := find(w.finish(m).Problems, "volume:acme_pgdata"); !strings.Contains(p.Detail, "may be newer than the export") {
+		t.Errorf("detail = %q", p.Detail)
+	}
+}
+
+func TestFinishComposeFallbackKeepsTheFileArguments(t *testing.T) {
+	w, m := migrated(t)
+	w.respond("container ls --all --quiet --no-trunc", runner.Response{})
+	var inv Inventory
+	m.Module(Name, &inv)
+	m = record(t, inv)
+	dir := w.home + "/GitHub/acme"
+	w.respond("compose --project-name acme --project-directory "+dir+" --file "+dir+"/docker-compose.yml --file /opt/shared/compose.yml up --detach --pull never --no-build", runner.Response{Code: 1, Stderr: "no such image"})
+	p := find(w.finish(m).Problems, "compose:acme")
+	want := "cd '" + dir + "' && docker compose --project-name 'acme' --project-directory '" + dir + "' --file '" + dir + "/docker-compose.yml' --file '/opt/shared/compose.yml' up -d"
+	if !strings.HasSuffix(p.Fix, want) {
+		t.Errorf("fix = %q, want it to end with %q", p.Fix, want)
+	}
+}
