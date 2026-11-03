@@ -26,7 +26,13 @@ type Stage struct {
 // Open returns the stage folder under home, creating it with mode 0700
 // when it does not exist.
 func Open(home string) (*Stage, error) {
-	root := filepath.Join(home, DirName)
+	return OpenDir(filepath.Join(home, DirName))
+}
+
+// OpenDir returns the private folder root, creating it with mode 0700 when
+// it does not exist. Exports live in one: ~/.mtm/exports, or the folder
+// prepare --stage makes on an external volume.
+func OpenDir(root string) (*Stage, error) {
 	if err := os.Mkdir(root, 0o700); err != nil && !errors.Is(err, fs.ErrExist) {
 		return nil, fmt.Errorf("create %s: %w", root, err)
 	}
