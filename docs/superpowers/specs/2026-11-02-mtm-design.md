@@ -437,7 +437,7 @@ Identities are recorded, never key material.
   - Private keys are only looked for, never opened.
 - **GPG keys:** `gpg --batch --no-tty --no-auto-check-trustdb --with-colons --list-secret-keys` gives each secret key's fingerprint, algorithm, creation date, and where its secret part is: here, on a card, or missing.
   - gpg runs only when a GnuPG folder (`$GNUPGHOME` or `~/.gnupg`) exists, since it would create one. Like any use of gpg, it may start gpg-agent.
-  - mtm looks for gpg in `/opt/homebrew/bin`, `/usr/local/bin`, and `/usr/local/MacGPG2/bin`. Without it, `prepare` warns, and `verify` asks the user to check with `gpg -K`.
+  - mtm looks for gpg in `/opt/homebrew/bin`, `/usr/local/bin`, and `/usr/local/MacGPG2/bin`. Without it, `prepare` warns, and a checklist step asks the user to check with `gpg -K` on the new Mac.
 - **Secure Enclave keys** can't move, so `scan` and `prepare` warn about them. They are found from any of:
   - `sk-` key types: a hardware security key, or the Secure Enclave through macOS's `/usr/lib/ssh-keychain.dylib`;
   - a `SecurityKeyProvider` in `~/.ssh/config`, or `SSH_SK_PROVIDER`, naming that library;
@@ -449,6 +449,7 @@ Identities are recorded, never key material.
   - turn on iCloud Keychain and check passwords and passkeys are present;
   - sign in to each password manager, and turn on its SSH agent if SSH used it;
   - create new Secure Enclave keys and add them to GitHub and servers, when the old Mac used them;
+  - check the GPG keys with `gpg -K`, when the old Mac's couldn't be listed;
   - enroll Touch ID fingerprints, unless the old Mac had none.
 - **`verify`:**
   - SSH keys and GPG secret keys match the record (critical). A missing key, or a public key with a different fingerprint, fails.

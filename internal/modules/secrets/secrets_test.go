@@ -364,6 +364,26 @@ func TestVerifyFailsWhenGPGIsGone(t *testing.T) {
 	}
 }
 
+func TestAnUnlistedGPGBecomesAStepNotABlock(t *testing.T) {
+	f := newFixture(t)
+	f.mod.GPG = f.mod.GPG[:1]
+	_, m := f.prepare(t)
+	items, err := f.mod.Steps(f.moduleEnv(m))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Contains(stepIDs(items), "secrets:gpg-check") {
+		t.Errorf("steps = %q, want secrets:gpg-check", stepIDs(items))
+	}
+	checks, err := f.mod.Verify(f.moduleEnv(m), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if c := check(t, checks, "secrets:gpg"); c.Status != module.StatusInfo || c.Critical {
+		t.Errorf("GPG check = %+v, want a non-critical info", c)
+	}
+}
+
 func TestParseSecretKeysRejectsAKeyWithoutAFingerprint(t *testing.T) {
 	if _, err := parseSecretKeys("sec:u:4096:1:AAAA:1625242223:::u:::scESC:::+:::23::0:\n"); err == nil {
 		t.Error("parsed a key with no fingerprint")

@@ -130,7 +130,7 @@ func (m Module) findings(inv Inventory, severity module.Severity) []module.Findi
 			Module: Name, ID: "gpg", Severity: severity, Handler: module.Manual,
 			Title:  "mtm can't list your GPG keys: gpg isn't installed where it looks",
 			Detail: "Looked in " + strings.Join(m.GPG, ", ") + ".",
-			Fix:    "verify won't check them. On the new Mac, run gpg -K and check your keys are there.",
+			Fix:    "On the new Mac, mtm checklist asks you to check them with gpg -K.",
 		})
 	}
 	if a, ok := m.app(inv.Agent); ok && a.Kind == catalog.KindPasswordManager {
@@ -248,6 +248,11 @@ func (m Module) Steps(env module.Env) ([]checklist.Item, error) {
 			Title:  "Make new Secure Enclave SSH keys and add them to GitHub and your servers",
 			Detail: "Keys in the old Mac's Secure Enclave can't leave it. Keys on a hardware security key keep working once it's plugged in." + hardwareKeys(inv.SSH)})
 	}
+	if inv.GPGUnlisted {
+		items = append(items, checklist.Item{ID: Name + ":gpg-check", Module: Name, Where: "Terminal",
+			Title:  "Check your GPG secret keys arrived: run gpg -K",
+			Detail: "mtm couldn't list them on the old Mac, because gpg wasn't installed where it looks."})
+	}
 	if inv.Fingerprints == nil || *inv.Fingerprints > 0 {
 		items = append(items, checklist.Item{ID: touchIDStep, Module: Name, Where: "System Settings > Touch ID & Password", Title: "Add your fingerprints to Touch ID"})
 	}
@@ -326,8 +331,9 @@ func verifySSH(home string, recorded []SSHKey) (module.Check, error) {
 func (m Module) verifyGPG(env module.Env, inv Inventory) module.Check {
 	c := module.Check{Module: Name, ID: Name + ":gpg", Status: module.StatusPass, Critical: true, Title: "GPG keys"}
 	if inv.GPGUnlisted {
-		c.Status = module.StatusWarn
-		c.Detail = "mtm couldn't list them on the old Mac; run gpg -K here and check they're all there"
+		c.Status = module.StatusInfo
+		c.Critical = false
+		c.Detail = "mtm couldn't list them on the old Mac; mtm checklist has a step to check them with gpg -K"
 		return c
 	}
 	now, err := m.gpgKeys(env)
