@@ -260,6 +260,28 @@ func (m Module) appSteps(installed []apps.App) []checklist.Item {
 	return items
 }
 
+// Retire lists, for mtm retire on the old Mac, the licenses to release
+// before it is erased: those of recorded apps whose vendor counts Macs.
+func (m Module) Retire(env module.Env, _ *stage.Stage) (module.Retirement, error) {
+	var old Inventory
+	if _, err := module.LoadInventory(env, Name, &old); err != nil {
+		return module.Retirement{}, err
+	}
+	if m.Catalog == nil {
+		return module.Retirement{}, nil
+	}
+	var items []checklist.Item
+	for _, a := range old.Apps {
+		entry, ok := m.Catalog.ByBundleID(a.BundleID)
+		if !ok || !entry.License.Deactivate {
+			continue
+		}
+		items = append(items, checklist.Item{ID: Name + ":deactivate:" + entry.ID, Module: Name, Where: entry.Name,
+			Title: "Deactivate the " + entry.Name + " license on this Mac", Detail: entry.License.DeactivateNote})
+	}
+	return module.Retirement{Steps: items}, nil
+}
+
 // restoreEtc copies an exported /etc file back as root-owned and readable
 // by all: the export is mtm's private 0600 copy, and cp would keep that
 // mode, leaving a file such as /etc/hosts unreadable to everyone else.

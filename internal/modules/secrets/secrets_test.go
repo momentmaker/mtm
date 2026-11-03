@@ -403,3 +403,20 @@ func TestConfigLineForms(t *testing.T) {
 		}
 	}
 }
+
+func TestRetireAsksToRemoveSecureEnclaveKeysOnlyWhenThereAreSome(t *testing.T) {
+	f := newFixture(t)
+	_, m := f.prepare(t)
+	if r, err := f.mod.Retire(f.moduleEnv(m), nil); err != nil || len(r.Steps) != 0 {
+		t.Errorf("retirement = %+v, %v; want no steps without Secure Enclave keys", r, err)
+	}
+	testutil.WriteFile(t, filepath.Join(f.home, ".ssh", "id_ecdsa_sk_rk.pub"), pubSK)
+	_, m = f.prepare(t)
+	r, err := f.mod.Retire(f.moduleEnv(m), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got := stepIDs(r.Steps); !slices.Equal(got, []string{"secrets:retire-secure-enclave"}) {
+		t.Errorf("steps = %q, want the Secure Enclave key removal", got)
+	}
+}

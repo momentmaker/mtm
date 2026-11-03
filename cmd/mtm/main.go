@@ -54,6 +54,9 @@ Usage:
   mtm checklist list [--all] [--json] | done <id>... | skip <id> --reason "..." | open <id>
   mtm verify [--only a,b] [--deep] [--details] [--json]
                                             check the new Mac against the record
+  mtm retire [--details] [--json]           on the old Mac, after SAFE TO WIPE: what changed since
+                                            prepare, then the steps before you erase it
+  mtm retire list [--all] [--json] | done <id>... | skip <id> --reason "..." | open <id>
   mtm cleanup [--force]                     delete ~/.mtm, and the --stage exports, after SAFE TO WIPE
   mtm version
 `
@@ -66,6 +69,7 @@ var commands = map[string]command{
 	"finish":    cmdFinish,
 	"checklist": cmdChecklist,
 	"verify":    cmdVerify,
+	"retire":    cmdRetire,
 	"cleanup":   cmdCleanup,
 }
 

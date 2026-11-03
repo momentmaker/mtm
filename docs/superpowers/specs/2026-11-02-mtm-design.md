@@ -81,7 +81,7 @@ Apple publishes no list of what Migration Assistant skips. The findings below co
 | 4 | New Mac | `mtm finish` | `mtm` is already present because Migration Assistant copies `/opt/homebrew`. Restores Docker data only if Migration Assistant didn't bring it intact, restarts services, re-registers launch agents, then starts the checklist. |
 | 5 | New Mac | `mtm checklist` | Walks through the manual steps, when run in a terminal. Each opens the right System Settings pane and waits for done, for a skip with a reason, or for later. Elsewhere it lists the open steps. `list [--all] [--json]`, `done <id>…`, `skip <id> --reason "…"`, and `open <id>` do the same one step at a time. |
 | 6 | New Mac | `mtm verify` | Compares the new Mac with the record. Prints **SAFE TO WIPE** or **NOT SAFE TO WIPE** with the reasons. Can be run any number of times. |
-| 7 | Old Mac | `mtm retire` | Lists anything on the old Mac that changed after `prepare`. Then walks through deactivating licenses, signing out of iCloud and turning off Find My, removing old Secure Enclave keys from services, and "Erase All Content and Settings". `mtm` never erases anything itself. |
+| 7 | Old Mac | `mtm retire` | After SAFE TO WIPE: lists anything on the old Mac that changed after `prepare`. Then walks through deactivating licenses, signing out of iCloud and turning off Find My, removing old Secure Enclave keys from services, and "Erase All Content and Settings", in a terminal; elsewhere it lists them. `list`, `done`, `skip`, and `open` work on these steps as they do for `mtm checklist`. `mtm` never erases anything itself. |
 | 8 | New Mac | `mtm cleanup` | After SAFE TO WIPE, deletes the exports and the record, including a `prepare --stage` folder when its drive is attached. Reminds the user to revoke the terminal's Full Disk Access. Refuses before SAFE TO WIPE unless `--force` is passed. |
 
 Every command can be re-run. `scan` and `verify` accept `--json`. `prepare`, `finish`, and `verify` accept `--only <module>`.
@@ -127,6 +127,8 @@ The checklist covers:
 - removing the old Mac's Secure Enclave SSH keys and passkeys from GitHub and servers once their replacements work;
 - "Erase All Content and Settings", which destroys the disk encryption key.
 
+The steps live in `~/.mtm/retire.json`, apart from the new Mac's `state.json`, so a step closed on the old Mac never counts toward the new Mac's verdict, even if Migration Assistant runs again. `retire` runs only on the Mac that ran `prepare`. It exits `1` when a module fails or a file outside `~/Library` changed; app state inside `~/Library` changes all the time, so it is listed as info.
+
 ### 6.6 Supply chain
 - Go with the standard library. The only third-party dependency is `github.com/BurntSushi/toml` (no transitive dependencies) for the catalog.
 - Dependencies are pinned in `go.sum`.
@@ -171,6 +173,7 @@ type Module interface {
 }
 ```
 - `Env` carries the runner, home directory, and the current mode (old Mac or new Mac). Logging wraps the runner. Modules that need the catalog get it through their constructors (`files.New`, `system.New`, `permissions.New`). `Env.Manifest` is the record: on the new Mac it is what `verify` and `finish` check against; during `prepare` it holds this Mac's previous record, if any, so a re-run can carry forward what the first run changed (for example, services it stopped).
+- Modules with something for `mtm retire` implement `Retire(env, st) (Retirement, error)` (`Retirer`): `Changes`, checks listing what changed on the old Mac since `prepare`, and `Steps`, checklist items for retiring it. `retire` puts the modules' steps before its own: signing out of iCloud, removing the Mac from the account's devices, and the erase.
 - Modules whose `prepare` changes the old Mac also implement `Undo(env, st) (Result, error)`, which `prepare --undo` calls. After a successful undo, that module's record is removed, so `verify` reports it not prepared until `prepare` runs again.
 - `Finding` has: module, id, severity (`info`, `warn`, `blocker`), handler (`migration-assistant`, `mtm`, `manual`), title, detail, fix.
 - `Result` has: what was done, artifacts written (each with its fingerprint), and problems.
@@ -225,6 +228,7 @@ volatile = ["~/Library/Application Support/com.raycast.macos/*.log"]
     postgres/        one <cluster>.sql.gz per running cluster (pg_dumpall output)
   docker-finish.json new Mac only: volumes finish found intact or restored
   state.json         new Mac only: checklist steps with their status and skip reasons, last verify result
+  retire.json        old Mac only: the retirement steps, with their status and skip reasons
   logs/              one log file per command run, redacted
 ```
 All paths in the record are relative to the home folder, so verification works if the username differs on the new Mac.
@@ -274,6 +278,7 @@ Otherwise **NOT SAFE TO WIPE**, followed by the blocking items. Exit codes: `0` 
 ### 9.1 `files`
 - `prepare` walks the home folder and writes `files.jsonl.gz` (section 8).
 - `verify` walks the same roots on the new Mac and applies section 8.4.
+- `retire` walks the old Mac's home folder again alongside the record, which is in the same walk order, so memory stays bounded. It lists files that differ from the record in type, size, time, or link target, and files the record doesn't have, even with an old time, as a copy from a drive keeps. Groups are those of section 8.4. Changes outside `~/Library` are warnings, those inside it info. Deleted files, folders, cloud-only files, volatile paths, and paths `prepare` couldn't read, with everything inside such a folder, aren't listed: there is nothing to compare them with. A path that can no longer be read is listed.
 - Fingerprinting streams with a bounded worker pool.
 
 ### 9.2 `git`
@@ -451,6 +456,7 @@ Identities are recorded, never key material.
   - create new Secure Enclave keys and add them to GitHub and servers, when the old Mac used them;
   - check the GPG keys with `gpg -K`, when the old Mac's couldn't be listed;
   - enroll Touch ID fingerprints, unless the old Mac had none.
+- **Retirement step** (`mtm retire`): when the old Mac used Secure Enclave keys, remove them, and any passkey made only on that Mac, from GitHub and servers once the new Mac's keys work.
 - **`verify`:**
   - SSH keys and GPG secret keys match the record (critical). A missing key, or a public key with a different fingerprint, fails.
   - Reports name SSH keys by file and GPG keys by algorithm and date, never by fingerprint.
@@ -465,6 +471,7 @@ Identities are recorded, never key material.
   - app inventory of `/Applications` and `~/Applications`, including one level of subfolders, skipping Apple's own `com.apple.*` apps and symlinks. Each app records its bundle id, version (`plutil -extract … raw`), and architectures (`lipo -archs`). Home apps are recorded as `~/Applications/…`.
 - **`scan` and `prepare`:** warn about Intel-only apps. They need Rosetta on the new Mac, and Rosetta is limited after macOS 27.
 - **Checklist steps** (section 7.3): from the catalog, for the recorded apps: one to reactivate each license marked `reactivate`, and one per note.
+- **Retirement steps** (`mtm retire`): one to deactivate each license marked `deactivate`, for apps whose vendor counts Macs.
 - **`finish`:**
   - Prints `sudo softwareupdate --install-rosetta --agree-to-license` if Rosetta is needed and missing.
   - For each `/etc` file that differs, prints `sudo install -m 0644 -o root -g wheel <copy> /etc/<file>`. `install` rather than `cp`, because the private copy is 0600 and `cp` would give a new `/etc` file that mode.
@@ -501,7 +508,7 @@ Identities are recorded, never key material.
 - **Unit tests per module.** A fake `runner` replays fixtures of real command output captured on macOS 26. The author's M3 is the first source. No unit test executes real system commands.
 - **Table-driven tests** for the file classification in section 8.4 and the verdict rules in section 8.5.
 - **Integration tests on a temporary home folder** (`HOME` overridden) with real files and real git repos created in a temp directory. They cover unpushed commits, stashes, untracked `.env` files, cloud-only files (simulated with flags where the test can set them), modes, and symlinks.
-- **No-network test** behind the `integration` build tag: runs `mtm scan`, `prepare`, and `verify` on a temporary home folder under a `sandbox-exec` profile that denies network access, including every `brew` and `git` command they invoke, and asserts they succeed.
+- **No-network test** behind the `integration` build tag: runs `mtm scan`, `prepare`, `verify`, and `retire` on a temporary home folder under a `sandbox-exec` profile that denies network access, including every `brew` and `git` command they invoke, and asserts they succeed.
 - **Docker integration tests** behind the `integration` build tag, run against a real Docker Desktop. They cover:
   - create a volume and an image, export, remove, and restore;
   - compare content digests, including owners and modes;

@@ -259,6 +259,25 @@ func (m Module) Steps(env module.Env) ([]checklist.Item, error) {
 	return items, nil
 }
 
+// Retire asks, for mtm retire on the old Mac, for its Secure Enclave keys
+// to be removed from the services that trust them. They die with this Mac,
+// but stay trusted until removed.
+func (m Module) Retire(env module.Env, _ *stage.Stage) (module.Retirement, error) {
+	var inv Inventory
+	if _, err := module.LoadInventory(env, Name, &inv); err != nil {
+		return module.Retirement{}, err
+	}
+	apps, err := m.recordedApps(env)
+	if err != nil || !usesSecureEnclave(inv, apps) {
+		return module.Retirement{}, err
+	}
+	return module.Retirement{Steps: []checklist.Item{{
+		ID: Name + ":retire-secure-enclave", Module: Name, Where: "GitHub > Settings > SSH and GPG keys, and each server's ~/.ssh/authorized_keys",
+		Title:  "Remove this Mac's Secure Enclave SSH keys from GitHub and your servers",
+		Detail: "Do it once the new Mac's keys work. Remove any passkey you made only on this Mac the same way, in each site's security settings.",
+	}}}, nil
+}
+
 func hardwareKeys(keys []SSHKey) string {
 	var names []string
 	for _, k := range keys {

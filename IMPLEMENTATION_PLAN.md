@@ -141,7 +141,23 @@ Found in the final review.
 **Success Criteria**: `retire` lists a file changed on the old Mac after `prepare`. SSH and GPG identities are critical checks.
 **Tests**: module unit tests with fixtures; a `retire` integration test on a temp home folder.
 **Plan**: `docs/superpowers/plans/2026-11-03-mtm-stage4-part2-browsers-secrets-retire.md`
-**Status**: In Progress
+**Status**: Complete
+
+#### Known gaps carried out of Stage 4, Part 2
+Found while planning.
+- **Real-run validation pending:**
+  - Arc's Safe Storage item name, and the Bitwarden and Secretive agent sockets in the catalog, haven't been checked against real installs;
+  - Firefox is tested only with fixture files;
+  - the gpg fixtures were written from GnuPG's documented colon format: a scratch GnuPG folder's path was too long for gpg-agent's socket.
+- **Safe Storage is checked for presence only.** A browser that made a new key on the new Mac passes, though the old Mac's passwords and cookies can't be decrypted with it. Comparing the keys would mean reading them.
+- **SSH agents:** `Include` files in `~/.ssh/config` aren't followed, and only the terminal's `SSH_AUTH_SOCK` is seen.
+- **An `sk-` key can be on a security key, which moves, or in the Secure Enclave, which doesn't.** mtm can't tell which, so its step covers both.
+- **retire:**
+  - it lists only home-folder changes, not data elsewhere, such as Postgres in `/opt/homebrew/var` or Docker volumes, if services or containers ran again after `prepare`;
+  - it can't tell a change Migration Assistant already copied from one made after it;
+  - a file changed inside a folder `prepare` couldn't read isn't listed, since nothing in it was recorded;
+  - a step a newer catalog adds lands after the erase step.
+- **Touch ID's count** comes from `bioutil`'s text output. If the format changes, the count is unknown and the step is listed anyway.
 
 ## Stage 5: Ship
 **Goal**: GitHub Actions CI on Apple Silicon (`go test`, `go vet`, `gofmt`, `govulncheck`, catalog validation); end-to-end tests in Tart VMs (cloned VM as a perfect migration, injected faults); release builds with checksums and provenance attestations; a Homebrew tap; README and contributor guide (including how to add a catalog app).

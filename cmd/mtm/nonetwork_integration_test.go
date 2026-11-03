@@ -146,6 +146,7 @@ func TestNoNetwork(t *testing.T) {
 		{[]string{"prepare", "--undo"}, []int{0, 1}, false, false},
 		{[]string{"prepare", "--only", "files,git,system,databases,docker,homebrew,toolchains,permissions,browsers,secrets"}, []int{0, 1}, true, true},
 		{[]string{"verify"}, []int{1}, false, false},
+		{[]string{"retire"}, []int{0, 1}, false, false},
 	}
 	for _, s := range steps {
 		name := "mtm " + strings.Join(s.args, " ")

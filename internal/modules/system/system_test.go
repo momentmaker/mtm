@@ -350,3 +350,27 @@ func TestStepsAreTheCatalogsForRecordedApps(t *testing.T) {
 		t.Errorf("steps = %+v\nwant %+v", items, want)
 	}
 }
+
+func TestRetireListsTheLicensesToDeactivate(t *testing.T) {
+	f := newFixture(t)
+	f.addApp(t, "CleanShot X.app", "pl.maketheweb.cleanshotx", "4.8", "CleanShot X", "arm64")
+	f.addApp(t, "Dash.app", "com.kapeli.dashdoc", "7.3", "Dash", "arm64")
+	m, st, _ := f.prepare(t)
+	c, err := catalog.Load(fstest.MapFS{
+		"cleanshot-x.toml": {Data: []byte("id = \"cleanshot-x\"\nname = \"CleanShot X\"\nbundle_id = \"pl.maketheweb.cleanshotx\"\n\n[license]\ndeactivate = true\ndeactivate_note = \"It counts Macs.\"\n")},
+		"dash.toml":        {Data: []byte("id = \"dash\"\nname = \"Dash\"\nbundle_id = \"com.kapeli.dashdoc\"\n\n[license]\nreactivate = true\n")},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	mod := f.module()
+	mod.Catalog = c
+	r, err := mod.Retire(f.env(m), st)
+	if err != nil {
+		t.Fatal(err)
+	}
+	want := []checklist.Item{{ID: "system:deactivate:cleanshot-x", Module: Name, Title: "Deactivate the CleanShot X license on this Mac", Detail: "It counts Macs.", Where: "CleanShot X"}}
+	if !slices.Equal(r.Steps, want) || len(r.Changes) != 0 {
+		t.Errorf("retirement = %+v\nwant steps %+v", r, want)
+	}
+}
