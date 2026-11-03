@@ -327,3 +327,65 @@ func TestUndoWithNothingToStartRunsNoCommand(t *testing.T) {
 		t.Errorf("ran %d commands, want none", n)
 	}
 }
+
+func (w *world) autoRemove() {
+	rm := strings.Replace(strings.ReplaceAll(containerInspect, "HOME", w.home), `"HostConfig": {"RestartPolicy": {"Name": "unless-stopped"`, `"HostConfig": {"AutoRemove": true, "RestartPolicy": {"Name": "unless-stopped"`, 1)
+	w.respond("container inspect dbcontainer testcontainer holder", runner.Response{Stdout: rm})
+}
+
+func TestScanWarnsAboutAnAutoRemoveContainer(t *testing.T) {
+	w := newWorld(t)
+	w.oldMac()
+	w.autoRemove()
+	findings, err := w.mod.Scan(w.env(nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	f := find(findings, "autoremove:acme-db-1")
+	if f.Severity != module.SeverityWarn || !strings.Contains(f.Fix, "docker container stop 'acme-db-1'") {
+		t.Errorf("autoremove finding = %+v", f)
+	}
+}
+
+func TestPrepareBlocksOnAnAutoRemoveContainerBeforeStoppingAnything(t *testing.T) {
+	w := newWorld(t)
+	w.oldMac()
+	w.autoRemove()
+	_, err := w.mod.Prepare(w.env(record(t, Inventory{})), w.st)
+	if err == nil || !strings.Contains(err.Error(), "acme-db-1") {
+		t.Errorf("err = %v, want the --rm container named", err)
+	}
+	for _, c := range w.fake.Calls() {
+		if strings.Contains(c.String(), "container stop") {
+			t.Errorf("prepare ran %q", c.String())
+		}
+	}
+}
+
+func TestPrepareRecordsAVolumeThatVanishedWithoutADigest(t *testing.T) {
+	w := newWorld(t)
+	w.oldMac()
+	w.then("volume ls --quiet", runner.Response{Stdout: "acme_pgdata\ncache\nnfs\n"}, runner.Response{Stdout: "acme_pgdata\nnfs\n"})
+	res, inv := w.prepare(record(t, Inventory{}))
+	if f := find(res.Problems, "volume:cache"); f.Severity != module.SeverityBlocker {
+		t.Errorf("problems = %+v, want a blocker for cache", res.Problems)
+	}
+	if len(inv.Volumes) != 2 {
+		t.Fatalf("volumes = %+v", inv.Volumes)
+	}
+	for _, v := range inv.Volumes {
+		switch v.Name {
+		case "cache":
+			if v.Digest != "" || v.Archive != nil {
+				t.Errorf("cache = %+v, want no digest", v)
+			}
+		case "acme_pgdata":
+			if v.Digest == "" {
+				t.Errorf("acme_pgdata = %+v, want exported", v)
+			}
+		}
+	}
+	if w.ran("container create --pull never --label dev.mtm.temporary=1 --volume cache:/vol " + EmptyImage + " /mtm-holder") {
+		t.Error("a holder was created for the vanished volume")
+	}
+}

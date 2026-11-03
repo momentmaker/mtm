@@ -328,12 +328,14 @@ Otherwise **NOT SAFE TO WIPE**, followed by the blocking items. Exit codes: `0` 
   - lists locally built images (their sizes from `docker image inspect`, which match what `docker image save` writes), pulled images, volumes with sizes (`docker system df --verbose`), running containers, and Compose projects (`com.docker.compose.project`, `.working_dir`, and `.config_files` labels);
   - estimates the export size from volumes plus locally built images. It is a **blocker** when that size doesn't fit beside the 10 GB reserve on the home volume, with the fix `mtm prepare --stage`.
   - warns about a container with restart policy `always` that mounts a volume. It restarts whenever Docker starts, so on the new Mac it would change its volume before `finish` checks it. The fix is `docker update --restart unless-stopped <name>`.
+  - warns about a running container started with `--rm` (`HostConfig.AutoRemove`): stopping it deletes it and its anonymous volumes, so `prepare` won't stop it.
   - warns about volumes it can't export: a driver other than `local`, or driver options such as a bind to a folder.
 - **`prepare`:**
   - Without Docker Desktop installed, it records "not installed". When Docker Desktop isn't running, a re-run keeps the earlier record with a warning; without one, the module fails with "start Docker Desktop and run `mtm prepare --only docker`".
   1. Removes leftover temporary containers from an interrupted run (label `dev.mtm.temporary`).
-  2. Checks the whole export fits (section 10) **before** stopping anything.
+  2. Checks the whole export fits (section 10) **before** stopping anything. A running container started with `--rm` is a blocker, before anything stops: stopping it would delete it and its anonymous volumes.
   3. Stops running containers one at a time (`docker container stop --time 60`, so databases shut down cleanly) and records them. On a re-run, containers the earlier run stopped stay recorded while they still exist and aren't running. A stop failure is a blocker; the volumes are then recorded without content digests, so `verify` fails them until `prepare` succeeds.
+     Then it lists the volumes again; one that disappeared is a blocker and is recorded without a digest, so `mtm` never vouches for a volume a holder would re-create empty.
   4. Exports each volume without network or a helper image:
      - `docker image import` a 1024-byte empty tar archive as `mtm/empty:1`;
      - `docker container create --pull never --label dev.mtm.temporary=1 --volume <name>:/vol mtm/empty:1 /mtm-holder`, a never-started container with the volume mounted (Docker needs a command, which never runs);

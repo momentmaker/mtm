@@ -5,6 +5,7 @@ import (
 	"os"
 	"reflect"
 	"slices"
+	"strings"
 	"testing"
 
 	"github.com/momentmaker/mtm/internal/runner"
@@ -191,5 +192,19 @@ func TestHomeRelativeRoundTrips(t *testing.T) {
 	}
 	if got := homeRelative("/Users/dev", "/Users/devops/x"); got != "/Users/devops/x" {
 		t.Errorf("homeRelative treated a sibling folder as home: %s", got)
+	}
+}
+
+func TestContainersReadAutoRemove(t *testing.T) {
+	w := newWorld(t)
+	w.oldMac()
+	rm := strings.Replace(strings.ReplaceAll(containerInspect, "HOME", w.home), `"HostConfig": {"RestartPolicy": {"Name": "unless-stopped"`, `"HostConfig": {"AutoRemove": true, "RestartPolicy": {"Name": "unless-stopped"`, 1)
+	w.respond("container inspect dbcontainer testcontainer holder", runner.Response{Stdout: rm})
+	cs, err := w.mod.containers(w.env(nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !cs[0].AutoRemove || cs[1].AutoRemove {
+		t.Errorf("AutoRemove = %v / %v, want true / false", cs[0].AutoRemove, cs[1].AutoRemove)
 	}
 }

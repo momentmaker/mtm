@@ -123,6 +123,14 @@ func (m Module) Scan(env module.Env) ([]module.Finding, error) {
 		})
 	}
 	for _, c := range s.containers {
+		if c.Running && c.AutoRemove {
+			findings = append(findings, module.Finding{
+				Module: Name, ID: "autoremove:" + c.Name, Severity: module.SeverityWarn, Handler: module.Manual,
+				Title:  c.Name + " was started with --rm",
+				Detail: "Stopping it deletes it and any anonymous volume it uses, so mtm prepare won't stop it.",
+				Fix:    "Copy out any data you need, then stop it yourself before mtm prepare: docker container stop " + macos.ShellQuote(c.Name),
+			})
+		}
 		if c.Restart == "always" && len(c.Volumes) > 0 {
 			findings = append(findings, module.Finding{
 				Module: Name, ID: "restart:" + c.Name, Severity: module.SeverityWarn, Handler: module.Manual,
@@ -183,6 +191,15 @@ func (m Module) Prepare(env module.Env, _ *stage.Stage) (module.Result, error) {
 		problem.Fix = spaceFix
 		return keepPrevious(previous, recorded, problem, "")
 	}
+	if doomed := autoRemoving(s.containers); len(doomed) > 0 {
+		pronoun := "it"
+		if len(doomed) > 1 {
+			pronoun = "them"
+		}
+		problem := blocker("autoremove", "Stopping "+strings.Join(doomed, ", ")+" would delete "+pronoun+" and any anonymous volumes", errors.New("They were started with --rm."))
+		problem.Fix = "Copy out any data you need, then stop " + pronoun + " yourself and run mtm prepare again."
+		return keepPrevious(previous, recorded, problem, "")
+	}
 
 	inv := Inventory{Installed: true, Engine: engine, Stopped: stillStopped(previous.Stopped, s.containers)}
 	var res module.Result
@@ -199,6 +216,20 @@ func (m Module) Prepare(env module.Env, _ *stage.Stage) (module.Result, error) {
 		res.Inventory, res.Problems = inv, failed
 		return res, nil
 	}
+	volumes, vanished, err := m.volumesAfterStop(env, s.volumes)
+	if err != nil {
+		inv.Volumes, inv.Images = s.volumes, s.images
+		res.Inventory = inv
+		res.Problems = append(res.Problems, blocker("list", "Could not list Docker's volumes", err))
+		return res, nil
+	}
+	for _, v := range vanished {
+		res.Problems = append(res.Problems, module.Finding{
+			Module: Name, ID: "volume:" + v.Name, Severity: module.SeverityBlocker, Handler: module.Manual,
+			Title: "Volume " + v.Name + " disappeared while prepare stopped containers",
+			Fix:   "Check whether you still need its data, then run mtm prepare --only docker again.",
+		})
+	}
 	if err := m.importEmpty(env); err != nil {
 		inv.Volumes, inv.Images = s.volumes, s.images
 		res.Inventory = inv
@@ -206,7 +237,7 @@ func (m Module) Prepare(env module.Env, _ *stage.Stage) (module.Result, error) {
 		return res, nil
 	}
 	var written int64
-	for _, v := range s.volumes {
+	for _, v := range volumes {
 		exported, err := m.exportVolume(env, v)
 		if err != nil {
 			inv.Volumes = append(inv.Volumes, v)
@@ -216,8 +247,9 @@ func (m Module) Prepare(env module.Env, _ *stage.Stage) (module.Result, error) {
 		inv.Volumes = append(inv.Volumes, exported)
 		written += exported.Archive.Size
 	}
-	if len(s.volumes) > 0 {
-		res.Done = append(res.Done, fmt.Sprintf("exported %s (%s)", words.Count(len(s.volumes), "volume", "volumes"), words.Bytes(uint64(written))))
+	inv.Volumes = append(inv.Volumes, vanished...)
+	if len(volumes) > 0 {
+		res.Done = append(res.Done, fmt.Sprintf("exported %s (%s)", words.Count(len(volumes), "volume", "volumes"), words.Bytes(uint64(written))))
 	}
 	images, problems, done := m.saveImages(env, s.images, kept)
 	inv.Images = images
@@ -230,6 +262,34 @@ func (m Module) Prepare(env module.Env, _ *stage.Stage) (module.Result, error) {
 	res.Problems = append(res.Problems, quitDocker)
 	res.Inventory = inv
 	return res, nil
+}
+
+func autoRemoving(cs []container) []string {
+	var out []string
+	for _, c := range cs {
+		if c.Running && c.AutoRemove {
+			out = append(out, c.Name)
+		}
+	}
+	return out
+}
+
+// volumesAfterStop splits the snapshot's volumes into those still there and
+// those that vanished while containers stopped. Exporting a vanished volume
+// would have a holder re-create it empty, and record that as verified.
+func (m Module) volumesAfterStop(env module.Env, snap []Volume) (present, vanished []Volume, err error) {
+	names, err := m.volumeNames(env)
+	if err != nil {
+		return nil, nil, err
+	}
+	for _, v := range snap {
+		if slices.Contains(names, v.Name) {
+			present = append(present, v)
+		} else {
+			vanished = append(vanished, v)
+		}
+	}
+	return present, vanished, nil
 }
 
 func blocker(id, title string, err error) module.Finding {

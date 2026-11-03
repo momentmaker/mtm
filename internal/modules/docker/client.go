@@ -119,6 +119,9 @@ type container struct {
 	Running bool
 	Restart string
 	Volumes []string
+	// AutoRemove is docker run --rm: stopping the container deletes it and
+	// its anonymous volumes.
+	AutoRemove bool
 }
 
 type inspectedImage struct {
@@ -219,6 +222,14 @@ func (m Module) volumes(env module.Env) ([]Volume, []string, error) {
 	return vols, skipped, nil
 }
 
+func (m Module) volumeNames(env module.Env) ([]string, error) {
+	out, err := m.docker(env, "volume", "ls", "--quiet")
+	if err != nil {
+		return nil, fmt.Errorf("list volumes: %w", err)
+	}
+	return strings.Fields(string(out.Stdout)), nil
+}
+
 func (m Module) volumeSizes(env module.Env) (map[string]int64, error) {
 	out, err := m.docker(env, "system", "df", "--verbose", "--format", "json")
 	if err != nil {
@@ -285,6 +296,7 @@ func parseContainers(home string, data []byte) ([]container, error) {
 			Running bool `json:"Running"`
 		} `json:"State"`
 		HostConfig struct {
+			AutoRemove    bool `json:"AutoRemove"`
 			RestartPolicy struct {
 				Name string `json:"Name"`
 			} `json:"RestartPolicy"`
@@ -312,8 +324,9 @@ func parseContainers(home string, data []byte) ([]container, error) {
 				Project:    labels["com.docker.compose.project"],
 				WorkingDir: homeRelative(home, labels["com.docker.compose.project.working_dir"]),
 			},
-			Running: r.State.Running,
-			Restart: r.HostConfig.RestartPolicy.Name,
+			Running:    r.State.Running,
+			Restart:    r.HostConfig.RestartPolicy.Name,
+			AutoRemove: r.HostConfig.AutoRemove,
 		}
 		if files := labels["com.docker.compose.project.config_files"]; files != "" {
 			for _, f := range strings.Split(files, ",") {
