@@ -114,7 +114,23 @@ The verdict starts counting open checklist items.
 - the no-network test runs `permissions` too.
 
 **Plan**: `docs/superpowers/plans/2026-11-02-mtm-stage4-part1-catalog-checklist-permissions.md`
-**Status**: Not Started
+**Status**: Complete
+
+#### Known gaps carried out of Stage 4, Part 1
+Found in the final review.
+- **Real-run validation pending:**
+  - `permissions` with Full Disk Access is tested only with fixtures of sqlite3 output;
+  - the macOS 26 System Settings deep links are unchecked (spec 12.5);
+  - the catalog's bundle ids and required permissions haven't been checked against real installs.
+- **Links:** `mtm checklist` opens any `x-apple.systempreferences:` link, not only the exact set mtm generates.
+- **Terminal detection:** a character device on stdin, such as `/dev/null`, counts as a terminal, so `mtm checklist </dev/null` starts the walk-through.
+- **Note step ids are positional** (`system:note:<id>:<n>`). Editing an app's notes can attach an old status to new text.
+- **The macOS version is read twice:** finish and verify run `sw_vers` again in `permissions` and `loginitems` instead of using the version preflight read.
+- **Stale steps** are never removed when the record or the catalog changes. They stay open, which is NOT SAFE, until skipped.
+- **Catalog edge cases:**
+  - Automation permissions in the catalog can't resolve, because they have no target;
+  - scan's permission count includes services System Settings doesn't show.
+- **Smaller test gaps** are listed in the final review in `.superpowers` (or in the plan's review history).
 
 ### Stage 4, Part 2: Browsers, secrets, and `retire`
 **Goal**:

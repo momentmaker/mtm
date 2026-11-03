@@ -170,7 +170,7 @@ type Module interface {
     Verify(env Env, st *stage.Stage) ([]Check, error)
 }
 ```
-- `Env` carries the runner, home directory, catalog, and the current mode (old Mac or new Mac). Logging wraps the runner. `Env.Manifest` is the record: on the new Mac it is what `verify` and `finish` check against; during `prepare` it holds this Mac's previous record, if any, so a re-run can carry forward what the first run changed (for example, services it stopped).
+- `Env` carries the runner, home directory, and the current mode (old Mac or new Mac). Logging wraps the runner. Modules that need the catalog get it through their constructors (`files.New`, `system.New`, `permissions.New`). `Env.Manifest` is the record: on the new Mac it is what `verify` and `finish` check against; during `prepare` it holds this Mac's previous record, if any, so a re-run can carry forward what the first run changed (for example, services it stopped).
 - Modules whose `prepare` changes the old Mac also implement `Undo(env, st) (Result, error)`, which `prepare --undo` calls. After a successful undo, that module's record is removed, so `verify` reports it not prepared until `prepare` runs again.
 - `Finding` has: module, id, severity (`info`, `warn`, `blocker`), handler (`migration-assistant`, `mtm`, `manual`), title, detail, fix.
 - `Result` has: what was done, artifacts written (each with its fingerprint), and problems.
@@ -215,7 +215,7 @@ volatile = ["~/Library/Application Support/com.raycast.macos/*.log"]
 ~/.mtm/
   manifest.json      schema version, mtm version, macOS version and build, hostname,
                      machine id (SHA-256 of the hardware UUID, never the raw UUID),
-                     prepare time, per-module inventories, export fingerprints, checklist items
+                     prepare time, per-module inventories, export fingerprints
   files.jsonl.gz     file record, one JSON object per line
   Brewfile           output of brew bundle dump, kept as a fallback
   exports/           or <stage folder>/mtm-exports with prepare --stage
@@ -227,6 +227,8 @@ volatile = ["~/Library/Application Support/com.raycast.macos/*.log"]
   logs/              one log file per command run, redacted
 ```
 All paths in the record are relative to the home folder, so verification works if the username differs on the new Mac.
+
+Checklist steps aren't in `manifest.json`. They follow from the record through each module's `Steps` (section 7.3), and `state.json` keeps them with what the user did with each.
 
 ### 8.2 File record entry
 ```json
