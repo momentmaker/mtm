@@ -7,6 +7,7 @@ import (
 	"fmt"
 	"time"
 
+	"github.com/momentmaker/mtm/internal/checklist"
 	"github.com/momentmaker/mtm/internal/manifest"
 	"github.com/momentmaker/mtm/internal/runner"
 	"github.com/momentmaker/mtm/internal/stage"
@@ -73,6 +74,8 @@ const (
 	StatusInfo Status = "info"
 )
 
+// Check is one verify result. Resolves names checklist steps a passing
+// check proves done, such as a privacy permission found granted.
 type Check struct {
 	Module   string   `json:"module"`
 	ID       string   `json:"id"`
@@ -81,15 +84,18 @@ type Check struct {
 	Title    string   `json:"title"`
 	Detail   string   `json:"detail,omitempty"`
 	Paths    []string `json:"paths,omitempty"`
+	Resolves []string `json:"resolves,omitempty"`
 }
 
 // Result is what Prepare and Finish return. Inventory is stored in the
 // manifest under the module's name. A Problems entry with SeverityBlocker
-// makes the run NOT READY.
+// makes the run NOT READY. Checklist holds the steps Finish leaves to the
+// user, which verify counts until each is done or skipped.
 type Result struct {
 	Inventory any
 	Done      []string
 	Problems  []Finding
+	Checklist []checklist.Item
 }
 
 type Module interface {

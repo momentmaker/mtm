@@ -219,7 +219,7 @@ func cmdFinish(ctx context.Context, a *app.App, args []string, stdout, stderr io
 		fmt.Fprintln(stderr, "mtm finish:", err)
 		return exitFailed
 	}
-	report.Finish(stdout, rep.Done, rep.Problems)
+	report.Finish(stdout, rep.Done, rep.Problems, rep.Pending)
 	if len(rep.Problems) > 0 {
 		return exitProblems
 	}

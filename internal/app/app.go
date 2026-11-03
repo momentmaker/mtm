@@ -14,6 +14,7 @@ import (
 	"strings"
 	"time"
 
+	"github.com/momentmaker/mtm/internal/checklist"
 	"github.com/momentmaker/mtm/internal/macos"
 	"github.com/momentmaker/mtm/internal/manifest"
 	"github.com/momentmaker/mtm/internal/module"
@@ -89,10 +90,11 @@ type CleanupReport struct {
 }
 
 // StepReport is what finish or prepare --undo did, and what is left to do
-// by hand.
+// by hand. Pending counts the checklist steps still open after finish.
 type StepReport struct {
 	Done     []string         `json:"done"`
 	Problems []module.Finding `json:"problems"`
+	Pending  int              `json:"pending_checklist"`
 }
 
 func (r *StepReport) add(name string, res module.Result) {
@@ -279,11 +281,12 @@ func (a *App) Verify(ctx context.Context, opts VerifyOptions) (VerifyReport, err
 		checks = append(checks, a.unknownModules(m)...)
 	}
 
-	v := verdict.Decide(checks, nil)
 	s, err := state.Load(st)
 	if err != nil {
 		return VerifyReport{}, err
 	}
+	resolve(&s.Checklist, checks, a.Now())
+	v := verdict.Decide(checks, pendingTitles(s.Checklist))
 	s.LastVerify = &state.VerifyResult{At: a.Now(), Safe: v.Safe && len(opts.Only) == 0}
 	if err := state.Save(st, s); err != nil {
 		return VerifyReport{}, err
@@ -324,6 +327,7 @@ func (a *App) Finish(ctx context.Context, opts FinishOptions) (StepReport, error
 	env := a.env(ctx, module.NewMac, false, m, run, exportsFor(st, m))
 	env.Force, env.RestoreDump = opts.Force, opts.RestoreDump
 	var rep StepReport
+	var items []checklist.Item
 	for _, mod := range mods {
 		if _, ok := m.Modules[mod.Name()]; !ok {
 			continue
@@ -334,8 +338,41 @@ func (a *App) Finish(ctx context.Context, opts FinishOptions) (StepReport, error
 			continue
 		}
 		rep.add(mod.Name(), res)
+		items = append(items, res.Checklist...)
 	}
+	s, err := state.Load(st)
+	if err != nil {
+		return rep, err
+	}
+	s.Checklist.Add(items...)
+	if err := state.Save(st, s); err != nil {
+		return rep, err
+	}
+	rep.Pending = len(s.Checklist.Pending())
 	return rep, nil
+}
+
+// resolve marks done the checklist steps a passing check proved done. A
+// step finish never added, because finish hasn't run, has nothing to mark.
+func resolve(l *checklist.List, checks []module.Check, at time.Time) {
+	for _, c := range checks {
+		if c.Status != module.StatusPass {
+			continue
+		}
+		for _, id := range c.Resolves {
+			if _, ok := l.Find(id); ok {
+				l.Done(id, at)
+			}
+		}
+	}
+}
+
+func pendingTitles(l checklist.List) []string {
+	var out []string
+	for _, e := range l.Pending() {
+		out = append(out, e.Title)
+	}
+	return out
 }
 
 // Undo puts the old Mac back in use when the migration is called off.

@@ -18,6 +18,7 @@ import (
 	"github.com/momentmaker/mtm/internal/preflight"
 	"github.com/momentmaker/mtm/internal/redact"
 	"github.com/momentmaker/mtm/internal/verdict"
+	"github.com/momentmaker/mtm/internal/words"
 )
 
 const shownPaths = 5
@@ -186,8 +187,9 @@ func Prepare(w io.Writer, ready bool, done []string, problems []module.Finding, 
 	fmt.Fprint(w, readyNext)
 }
 
-// Finish prints what finish did and what is left to do by hand.
-func Finish(w io.Writer, done []string, problems []module.Finding) {
+// Finish prints what finish did and what is left to do by hand: problems,
+// and pending, the checklist steps still open.
+func Finish(w io.Writer, done []string, problems []module.Finding, pending int) {
 	writeDone(w, done)
 	if module.HasBlocker(problems) {
 		writeProblems(w, "Problems", problems)
@@ -195,6 +197,11 @@ func Finish(w io.Writer, done []string, problems []module.Finding) {
 		return
 	}
 	writeProblems(w, "Do these by hand", problems)
+	if pending > 0 {
+		fmt.Fprintf(w, "%s in the checklist.\n", words.Count(pending, "step is waiting", "steps are waiting"))
+		fmt.Fprintln(w, "Next: run mtm checklist, then mtm verify")
+		return
+	}
 	fmt.Fprintln(w, "Next: run mtm verify")
 }
 
@@ -238,6 +245,9 @@ func Verify(w io.Writer, checks []module.Check, v verdict.Verdict, details bool)
 	}
 	for _, item := range v.Pending {
 		fmt.Fprintf(w, "  ✗ checklist: %s\n", clean(item))
+	}
+	if len(v.Pending) > 0 {
+		fmt.Fprintln(w, "Run mtm checklist to do or skip the open steps.")
 	}
 }
 

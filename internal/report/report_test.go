@@ -166,7 +166,7 @@ func TestFinishListsByHandStepsThenVerify(t *testing.T) {
 	Finish(&out, []string{"homebrew: started postgresql@16"}, []module.Finding{{
 		Module: "system", Severity: module.SeverityWarn, Handler: module.Manual,
 		Title: "Intel-only apps need Rosetta", Fix: "Run: sudo softwareupdate --install-rosetta --agree-to-license",
-	}})
+	}}, 0)
 	for _, want := range []string{"✓ homebrew: started postgresql@16", "Do these by hand", "→ Run: sudo softwareupdate", "Next: run mtm verify"} {
 		if !strings.Contains(out.String(), want) {
 			t.Errorf("output missing %q:\n%s", want, out.String())
@@ -176,7 +176,7 @@ func TestFinishListsByHandStepsThenVerify(t *testing.T) {
 
 func TestFinishBlockedSaysToRunAgain(t *testing.T) {
 	var out bytes.Buffer
-	Finish(&out, nil, []module.Finding{{Module: "preflight", Severity: module.SeverityBlocker, Title: "FileVault is off"}})
+	Finish(&out, nil, []module.Finding{{Module: "preflight", Severity: module.SeverityBlocker, Title: "FileVault is off"}}, 0)
 	if !strings.Contains(out.String(), "run mtm finish again") || strings.Contains(out.String(), "Next: run mtm verify") {
 		t.Errorf("blocked output:\n%s", out.String())
 	}
@@ -220,5 +220,25 @@ func TestPrepareReadyTellsAStageUserToKeepTheDrive(t *testing.T) {
 	}
 	if strings.Contains(plain.String(), "Keep the drive") {
 		t.Errorf("output without --stage mentions the drive:\n%s", plain.String())
+	}
+}
+
+func TestFinishPointsToTheChecklist(t *testing.T) {
+	var out bytes.Buffer
+	Finish(&out, nil, nil, 3)
+	for _, want := range []string{"3 steps are waiting in the checklist.", "Next: run mtm checklist, then mtm verify"} {
+		if !strings.Contains(out.String(), want) {
+			t.Errorf("output missing %q:\n%s", want, out.String())
+		}
+	}
+}
+
+func TestVerifyNotSafeListsOpenStepsAndTheCommand(t *testing.T) {
+	var out bytes.Buffer
+	Verify(&out, nil, verdict.Decide(nil, []string{"Give Raycast Accessibility access"}), false)
+	for _, want := range []string{"NOT SAFE TO WIPE", "✗ checklist: Give Raycast Accessibility access", "Run mtm checklist to do or skip the open steps."} {
+		if !strings.Contains(out.String(), want) {
+			t.Errorf("output missing %q:\n%s", want, out.String())
+		}
 	}
 }
