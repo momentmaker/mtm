@@ -242,7 +242,8 @@ func (a *App) Verify(ctx context.Context, opts VerifyOptions) (VerifyReport, err
 	if err != nil {
 		return VerifyReport{}, err
 	}
-	if info.MachineID == m.MachineID {
+	onOldMac := info.MachineID == m.MachineID
+	if onOldMac {
 		checks = append(checks, module.Check{
 			Module: preflight.Module, ID: "same-mac", Status: module.StatusFail, Critical: true,
 			Title:  "This is the Mac that ran prepare",
@@ -285,16 +286,21 @@ func (a *App) Verify(ctx context.Context, opts VerifyOptions) (VerifyReport, err
 	if err != nil {
 		return VerifyReport{}, err
 	}
-	// Every module's steps count, even with --only, since the verdict
-	// covers the whole checklist.
-	_, failed := mergeSteps(env, a.Modules, m, &s.Checklist)
-	for _, f := range failed {
-		checks = append(checks, module.Check{
-			Module: f.module, ID: f.module + ":steps", Status: module.StatusFail,
-			Title: f.module + ": could not list its checklist steps", Detail: f.err.Error(),
-		})
+	// The old Mac gets no steps: one the user closed there would reach the
+	// new Mac already closed, in the state.json Migration Assistant copies.
+	// same-mac already fails the verdict.
+	if !onOldMac {
+		// Every module's steps count, even with --only, since the verdict
+		// covers the whole checklist.
+		_, failed := mergeSteps(env, a.Modules, m, &s.Checklist)
+		for _, f := range failed {
+			checks = append(checks, module.Check{
+				Module: f.module, ID: f.module + ":steps", Status: module.StatusFail,
+				Title: f.module + ": could not list its checklist steps", Detail: f.err.Error(),
+			})
+		}
+		resolve(&s.Checklist, checks, a.Now())
 	}
-	resolve(&s.Checklist, checks, a.Now())
 	v := verdict.Decide(checks, pendingTitles(s.Checklist))
 	s.LastVerify = &state.VerifyResult{At: a.Now(), Safe: v.Safe && len(opts.Only) == 0}
 	if err := state.Save(st, s); err != nil {

@@ -248,3 +248,21 @@ func TestFinishThatAddsAStepNeedsAnotherVerifyBeforeCleanup(t *testing.T) {
 		t.Errorf("cleanup after finish added a step: %v, want ErrNotVerified", err)
 	}
 }
+
+func TestVerifyOnTheOldMacLeavesNoStepsToCarryOver(t *testing.T) {
+	old := t.TempDir()
+	mustPrepare(t, stepApp(old, oldUUID, stepsModule{}))
+	if _, err := stepApp(old, oldUUID, stepsModule{}).Verify(ctx, VerifyOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	if entries := loadState(t, old).Checklist.Entries; len(entries) != 0 {
+		t.Fatalf("old Mac's checklist = %+v, want it empty", entries)
+	}
+	rep, err := stepApp(migrate(t, old), newUUID, stepsModule{}).Verify(ctx, VerifyOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{grantStep.Title, licenseStep.Title}; !slices.Equal(rep.Verdict.Pending, want) {
+		t.Errorf("new Mac's pending = %q, want %q", rep.Verdict.Pending, want)
+	}
+}
