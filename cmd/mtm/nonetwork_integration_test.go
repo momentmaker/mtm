@@ -129,9 +129,9 @@ func TestNoNetwork(t *testing.T) {
 		brewfile bool
 	}{
 		{[]string{"scan"}, []int{0, 1}, false},
-		{[]string{"prepare", "--only", "files,git,system,databases,docker,homebrew,toolchains"}, []int{0, 1}, true},
+		{[]string{"prepare", "--only", "files,git,system,databases,docker,homebrew,toolchains,permissions"}, []int{0, 1}, true},
 		{[]string{"prepare", "--undo"}, []int{0, 1}, false},
-		{[]string{"prepare", "--only", "files,git,system,databases,docker,homebrew,toolchains"}, []int{0, 1}, true},
+		{[]string{"prepare", "--only", "files,git,system,databases,docker,homebrew,toolchains,permissions"}, []int{0, 1}, true},
 		{[]string{"verify"}, []int{1}, false},
 	}
 	for _, s := range steps {
