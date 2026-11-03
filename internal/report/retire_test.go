@@ -28,3 +28,15 @@ func TestRetireWithNothingChanged(t *testing.T) {
 		t.Errorf("output:\n%s", out.String())
 	}
 }
+
+func TestRetireWithNothingChangedAndAProblemDoesNotSayNothingChanged(t *testing.T) {
+	var out bytes.Buffer
+	problems := []module.Finding{{Module: "lic", ID: "lic:not-prepared", Severity: module.SeverityWarn, Title: "lic was not recorded by prepare, so retire can't check it"}}
+	Retire(&out, time.Now(), nil, problems, false)
+	if strings.Contains(out.String(), "Nothing in your home folder changed") {
+		t.Errorf("output claims nothing changed:\n%s", out.String())
+	}
+	if !strings.Contains(out.String(), "mtm couldn't check everything; see the problems above.") {
+		t.Errorf("output:\n%s", out.String())
+	}
+}

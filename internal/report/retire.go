@@ -17,7 +17,12 @@ func Retire(w io.Writer, preparedAt time.Time, changes []module.Check, problems 
 	writeProblems(w, "Problems", problems)
 	since := preparedAt.Local().Format(time.RFC1123)
 	if len(changes) == 0 {
-		fmt.Fprintf(w, "Nothing in your home folder changed after mtm prepare (%s).\n\n", since)
+		if len(problems) > 0 {
+			fmt.Fprintln(w, "mtm couldn't check everything; see the problems above.")
+		} else {
+			fmt.Fprintf(w, "Nothing in your home folder changed after mtm prepare (%s).\n", since)
+		}
+		fmt.Fprintln(w)
 		return
 	}
 	fmt.Fprintf(w, "Changed on this Mac after mtm prepare (%s)\n", since)

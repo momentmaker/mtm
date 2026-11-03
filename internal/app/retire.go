@@ -37,6 +37,16 @@ var retireSteps = []checklist.Item{
 		Detail: "It destroys the disk's encryption key, so nothing on it can be recovered. mtm never erases anything itself."},
 }
 
+// notPrepared keeps retire from saying nothing changed about a module it
+// couldn't look at.
+func notPrepared(name string) module.Finding {
+	return module.Finding{
+		Module: name, ID: name + ":not-prepared", Severity: module.SeverityWarn, Handler: module.Manual,
+		Title: name + " was not recorded by prepare, so retire can't check it",
+		Fix:   "Check it yourself before you erase this Mac.",
+	}
+}
+
 // Retire lists what changed on the old Mac since prepare and adds the
 // retirement steps to retire.json, keeping what the user did with steps
 // already there. It runs only on the Mac that ran prepare.
@@ -70,6 +80,7 @@ func (a *App) Retire(ctx context.Context) (RetireReport, error) {
 			continue
 		}
 		if _, recorded := m.Modules[mod.Name()]; !recorded {
+			rep.Problems = append(rep.Problems, notPrepared(mod.Name()))
 			continue
 		}
 		got, err := r.Retire(env, st)

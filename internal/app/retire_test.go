@@ -94,3 +94,15 @@ func TestRetirePutsModuleStepsFirstAndReportsAModuleThatFails(t *testing.T) {
 		t.Errorf("steps = %q, want %q", stepIDs(rep.Steps), want)
 	}
 }
+
+func TestRetireReportsARetirerThatPrepareDidNotRecord(t *testing.T) {
+	old := t.TempDir()
+	mustPrepare(t, stepApp(old, oldUUID, finishOnly{name: "other"}))
+	rep := retireOn(t, stepApp(old, oldUUID, finishOnly{name: "other"}, licenseRetirer{finishOnly{name: "lic"}}))
+	if len(rep.Problems) != 1 || rep.Problems[0].ID != "lic:not-prepared" || rep.Problems[0].Severity != module.SeverityWarn {
+		t.Errorf("problems = %+v, want lic not prepared", rep.Problems)
+	}
+	if slices.Contains(stepIDs(rep.Steps), "lic:deactivate") {
+		t.Errorf("steps = %q, want none from a module prepare didn't record", stepIDs(rep.Steps))
+	}
+}

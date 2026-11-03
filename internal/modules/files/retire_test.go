@@ -1,6 +1,7 @@
 package files
 
 import (
+	"bytes"
 	"context"
 	"os"
 	"path/filepath"
@@ -152,6 +153,37 @@ func TestRetireSkipsWhatAFolderUnreadableAtPrepareHolds(t *testing.T) {
 		t.Fatal(err)
 	}
 	if changes := retireHome(t, home, m); len(changes) != 0 {
+		t.Errorf("changes = %+v, want none", changes)
+	}
+}
+
+func TestRetireSkipsWhatAFolderThatWasCloudOnlyOrAnotherVolumeAtPrepareHolds(t *testing.T) {
+	home := t.TempDir()
+	testutil.WriteFile(t, filepath.Join(home, "Documents/cloudy/a.txt"), "a\n")
+	testutil.WriteFile(t, filepath.Join(home, "Media/x.txt"), "x\n")
+	var buf bytes.Buffer
+	w := manifest.NewRecordWriter(&buf)
+	for _, e := range []manifest.Entry{
+		{Path: "Documents", Type: manifest.TypeDir},
+		{Path: "Documents/cloudy", Type: manifest.TypeCloud},
+		{Path: "Media", Type: manifest.TypeMount},
+	} {
+		if err := w.Write(e); err != nil {
+			t.Fatal(err)
+		}
+	}
+	if err := w.Close(); err != nil {
+		t.Fatal(err)
+	}
+	rr, err := manifest.NewRecordReader(&buf)
+	if err != nil {
+		t.Fatal(err)
+	}
+	tally, err := New().changes(module.Env{Ctx: context.Background(), Home: home}, rr)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if changes := tally.checks(); len(changes) != 0 {
 		t.Errorf("changes = %+v, want none", changes)
 	}
 }

@@ -103,11 +103,16 @@ func (m Module) changes(env module.Env, rr *manifest.RecordReader) (*changeTally
 		}
 		// Prepare already reported what it couldn't read. With no recorded
 		// size or time there is nothing to compare, and nothing inside an
-		// unread folder was recorded.
+		// unread folder was recorded. The same goes for a folder that was
+		// cloud-only or on another volume then: prepare didn't go inside.
 		if recorded && rec.Type == manifest.TypeUnreadable {
 			if it.info != nil && it.info.IsDir() {
 				unseen = it.rel
 			}
+			return nil
+		}
+		if recorded && (rec.Type == manifest.TypeCloud || rec.Type == manifest.TypeMount) && it.info != nil && it.info.IsDir() {
+			unseen = it.rel
 			return nil
 		}
 		if m.isVolatile(it.rel) {
