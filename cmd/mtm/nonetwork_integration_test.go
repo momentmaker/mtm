@@ -142,9 +142,9 @@ func TestNoNetwork(t *testing.T) {
 		catalogFallback bool
 	}{
 		{[]string{"scan"}, []int{0, 1}, false, true},
-		{[]string{"prepare", "--only", "files,git,system,databases,docker,homebrew,toolchains,permissions,browsers"}, []int{0, 1}, true, true},
+		{[]string{"prepare", "--only", "files,git,system,databases,docker,homebrew,toolchains,permissions,browsers,secrets"}, []int{0, 1}, true, true},
 		{[]string{"prepare", "--undo"}, []int{0, 1}, false, false},
-		{[]string{"prepare", "--only", "files,git,system,databases,docker,homebrew,toolchains,permissions,browsers"}, []int{0, 1}, true, true},
+		{[]string{"prepare", "--only", "files,git,system,databases,docker,homebrew,toolchains,permissions,browsers,secrets"}, []int{0, 1}, true, true},
 		{[]string{"verify"}, []int{1}, false, false},
 	}
 	for _, s := range steps {
@@ -152,7 +152,9 @@ func TestNoNetwork(t *testing.T) {
 		cmd := exec.Command("/usr/bin/sandbox-exec", append([]string{"-p", sandboxProfile, bin}, s.args...)...)
 		// The temp home would hide Homebrew's package data, which every real
 		// install keeps in its cache; mtm itself checks that it is there.
-		cmd.Env = append(os.Environ(), "HOME="+home, "HOMEBREW_CACHE="+cache)
+		// The emptied variables would point secrets at the developer's own
+		// SSH agent and GnuPG folder.
+		cmd.Env = append(os.Environ(), "HOME="+home, "HOMEBREW_CACHE="+cache, "GNUPGHOME=", "SSH_AUTH_SOCK=", "SSH_SK_PROVIDER=")
 		out, err := cmd.CombinedOutput()
 		code := 0
 		var exitErr *exec.ExitError

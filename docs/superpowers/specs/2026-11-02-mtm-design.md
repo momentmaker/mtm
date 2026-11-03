@@ -430,15 +430,31 @@ Otherwise **NOT SAFE TO WIPE**, followed by the blocking items. Exit codes: `0` 
   - Safari: an info check.
 
 ### 9.10 `secrets`
-- Records `~/.ssh` key names and types (`ssh-keygen -l` on public keys), and `gpg --list-secret-keys` identities (never key material).
-- Detects Secure Enclave or hardware-backed SSH keys: Secretive installed, `SSH_AUTH_SOCK` pointing to a Secure Enclave agent, `sk-` key types.
-- Detects password managers from the catalog (1Password, Bitwarden).
-- **`finish` checklist:**
-  - turn on iCloud Keychain and check passkeys are present;
-  - sign in to the password manager and turn on its SSH agent if it was used;
-  - create new Secure Enclave keys and add them to GitHub and servers;
-  - enroll Touch ID fingerprints.
-- **`verify`:** SSH and GPG identities match (critical). The keychain items recorded by other modules are present.
+Identities are recorded, never key material.
+- **SSH keys** in `~/.ssh`:
+  - every `*.pub` file, with its type and fingerprint, computed as `ssh-keygen -l` does from the public key alone, and whether its private half sits beside it;
+  - `id_*` files without a public half, by name.
+  - Private keys are only looked for, never opened.
+- **GPG keys:** `gpg --batch --no-tty --no-auto-check-trustdb --with-colons --list-secret-keys` gives each secret key's fingerprint, algorithm, creation date, and where its secret part is: here, on a card, or missing.
+  - gpg runs only when a GnuPG folder (`$GNUPGHOME` or `~/.gnupg`) exists, since it would create one. Like any use of gpg, it may start gpg-agent.
+  - mtm looks for gpg in `/opt/homebrew/bin`, `/usr/local/bin`, and `/usr/local/MacGPG2/bin`. Without it, `prepare` warns, and `verify` asks the user to check with `gpg -K`.
+- **Secure Enclave keys** can't move, so `scan` and `prepare` warn about them. They are found from any of:
+  - `sk-` key types: a hardware security key, or the Secure Enclave through macOS's `/usr/lib/ssh-keychain.dylib`;
+  - a `SecurityKeyProvider` in `~/.ssh/config`, or `SSH_SK_PROVIDER`, naming that library;
+  - an SSH agent whose catalog `kind` is `secure-enclave-agent` (Secretive), or such an app in the `system` record.
+- **The SSH agent:** `SSH_AUTH_SOCK` and the `IdentityAgent` lines in `~/.ssh/config` (not its `Include` files), matched against the catalog's `ssh_agent` sockets, following links.
+- **Password managers:** the apps in the `system` record whose catalog `kind` is `password-manager` (1Password, Bitwarden).
+- **Touch ID:** how many fingerprints are enrolled, from `/usr/bin/bioutil -c`, which only reads.
+- **Checklist steps** (section 7.3):
+  - turn on iCloud Keychain and check passwords and passkeys are present;
+  - sign in to each password manager, and turn on its SSH agent if SSH used it;
+  - create new Secure Enclave keys and add them to GitHub and servers, when the old Mac used them;
+  - enroll Touch ID fingerprints, unless the old Mac had none.
+- **`verify`:**
+  - SSH keys and GPG secret keys match the record (critical). A missing key, or a public key with a different fingerprint, fails.
+  - Reports name SSH keys by file and GPG keys by algorithm and date, never by fingerprint.
+  - Enrolled fingerprints resolve the Touch ID step.
+  - The `browsers` module checks its own keychain items.
 
 ### 9.11 `system`
 - **Recorded:**

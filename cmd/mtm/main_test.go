@@ -279,7 +279,7 @@ func TestDefaultAppModules(t *testing.T) {
 	for _, m := range defaultApp(t.TempDir()).Modules {
 		names = append(names, m.Name())
 	}
-	if want := []string{"files", "git", "system", "databases", "docker", "homebrew", "toolchains", "loginitems", "permissions", "browsers"}; !slices.Equal(names, want) {
+	if want := []string{"files", "git", "system", "databases", "docker", "homebrew", "toolchains", "loginitems", "permissions", "browsers", "secrets"}; !slices.Equal(names, want) {
 		t.Errorf("modules = %q, want %q", names, want)
 	}
 }
@@ -291,7 +291,7 @@ func TestDefaultAppModulesThatLeaveSteps(t *testing.T) {
 			names = append(names, m.Name())
 		}
 	}
-	if want := []string{"system", "loginitems", "permissions", "browsers"}; !slices.Equal(names, want) {
+	if want := []string{"system", "loginitems", "permissions", "browsers", "secrets"}; !slices.Equal(names, want) {
 		t.Errorf("modules with steps = %q, want %q", names, want)
 	}
 }

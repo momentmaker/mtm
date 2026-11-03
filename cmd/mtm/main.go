@@ -24,6 +24,7 @@ import (
 	"github.com/momentmaker/mtm/internal/modules/homebrew"
 	"github.com/momentmaker/mtm/internal/modules/loginitems"
 	"github.com/momentmaker/mtm/internal/modules/permissions"
+	"github.com/momentmaker/mtm/internal/modules/secrets"
 	"github.com/momentmaker/mtm/internal/modules/system"
 	"github.com/momentmaker/mtm/internal/modules/toolchains"
 	"github.com/momentmaker/mtm/internal/report"
@@ -88,7 +89,7 @@ func defaultApp(home string) *app.App {
 		Modules: []module.Module{
 			files.New(cat.Volatile()...), git.New(), system.New(name, cat), databases.New(), docker.New(),
 			homebrew.New(name), toolchains.New(name), loginitems.New(os.Getuid()), permissions.New(cat),
-			browsers.New(),
+			browsers.New(), secrets.New(cat),
 		},
 	}
 }
