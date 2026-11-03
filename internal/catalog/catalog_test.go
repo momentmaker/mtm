@@ -1,6 +1,7 @@
 package catalog
 
 import (
+	"os"
 	"strings"
 	"testing"
 	"testing/fstest"
@@ -14,6 +15,27 @@ func TestEveryCatalogFileIsValid(t *testing.T) {
 	}
 	if len(c.Apps) < 20 {
 		t.Errorf("catalog has %d apps, want the starter set", len(c.Apps))
+	}
+}
+
+// TestReadmeExampleIsAValidFile keeps the contributor guide's example a
+// file the catalog accepts, so copying it can't start a contributor off
+// with a rejected file.
+func TestReadmeExampleIsAValidFile(t *testing.T) {
+	data, err := os.ReadFile("../../catalog/README.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	_, rest, ok := strings.Cut(string(data), "```toml\n")
+	if !ok {
+		t.Fatal("catalog/README.md has no toml example")
+	}
+	example, _, ok := strings.Cut(rest, "```")
+	if !ok {
+		t.Fatal("catalog/README.md's toml example isn't closed")
+	}
+	if _, err := Parse("raycast.toml", []byte(example)); err != nil {
+		t.Errorf("README example: %v", err)
 	}
 }
 

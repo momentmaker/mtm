@@ -6,6 +6,7 @@ One TOML file per app, named after its `id`. mtm builds every file here into its
 id = "raycast"                 # lowercase words joined by hyphens; must match the file name
 name = "Raycast"               # as the app names itself
 bundle_id = "com.raycast.macos"
+notes = ["Sign in to your account again if it asks."]   # extra checklist steps
 
 [[permissions]]                # privacy permissions the app needs to work
 service = "Accessibility"      # a name from internal/catalog/services.go
@@ -14,8 +15,6 @@ service = "Accessibility"      # a name from internal/catalog/services.go
 [license]
 reactivate = true              # the license must be entered again on a new Mac
 note = "Enter your license again if it asks."
-
-notes = ["Sign in to your account again if it asks."]   # extra checklist steps
 
 [state]
 volatile = ["~/Library/Application Support/Raycast/logs/"]   # paths the app deletes on its own
@@ -39,7 +38,6 @@ Volatile paths that are missing after Migration Assistant are reported as info, 
 Several apps' names and bundle ids were first taken from the definitions of [tape](https://github.com/vitorgalvao/tape) by Vítor Galvão, under the BSD 2-Clause License:
 
 ```
-Copyright (c) 2022, Vítor Galvão
 Copyright (c) 2022, Vítor Galvão
 All rights reserved.
 
