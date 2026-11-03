@@ -75,6 +75,9 @@ func listSteps(a *app.App, args []string, stdout, stderr io.Writer) int {
 		return exitFailed
 	}
 	if *asJSON {
+		if !*all {
+			l = checklist.List{Entries: l.Pending()}
+		}
 		if err := report.JSON(stdout, l); err != nil {
 			fmt.Fprintln(stderr, "mtm checklist:", err)
 			return exitFailed

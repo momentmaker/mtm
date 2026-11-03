@@ -3,8 +3,10 @@ package main
 import (
 	"bytes"
 	"context"
+	"encoding/json"
 	"io"
 	"os"
+	"slices"
 	"strings"
 	"testing"
 	"time"
@@ -87,6 +89,42 @@ func TestChecklistDoneAndSkip(t *testing.T) {
 	run(ctx, []string{"checklist", "list", "--all"}, &out, &errOut, newApp)
 	if !strings.Contains(out.String(), "0 steps open") || !strings.Contains(out.String(), "skipped: sold it") {
 		t.Errorf("list --all:\n%s", out.String())
+	}
+}
+
+// listedIDs runs mtm checklist list --json, after marking the Raycast step
+// done, and returns the ids of the steps it printed.
+func listedIDs(t *testing.T, args ...string) []string {
+	t.Helper()
+	_, newApp := checklistHome(t)
+	var out, errOut bytes.Buffer
+	if code := run(ctx, []string{"checklist", "done", raycastStep.ID}, &out, &errOut, newApp); code != exitOK {
+		t.Fatalf("done exit %d: %s", code, errOut.String())
+	}
+	out.Reset()
+	if code := run(ctx, append([]string{"checklist", "list", "--json"}, args...), &out, &errOut, newApp); code != exitOK {
+		t.Fatalf("list exit %d: %s", code, errOut.String())
+	}
+	var l checklist.List
+	if err := json.Unmarshal(out.Bytes(), &l); err != nil {
+		t.Fatalf("%v:\n%s", err, out.String())
+	}
+	var ids []string
+	for _, e := range l.Entries {
+		ids = append(ids, e.ID)
+	}
+	return ids
+}
+
+func TestChecklistListJSONHoldsOnlyTheOpenSteps(t *testing.T) {
+	if ids := listedIDs(t); !slices.Equal(ids, []string{dashStep.ID}) {
+		t.Errorf("ids = %q, want only the open Dash step", ids)
+	}
+}
+
+func TestChecklistListJSONAllHoldsEveryStep(t *testing.T) {
+	if ids := listedIDs(t, "--all"); !slices.Equal(ids, []string{raycastStep.ID, dashStep.ID}) {
+		t.Errorf("ids = %q, want both steps", ids)
 	}
 }
 
