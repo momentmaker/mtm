@@ -86,10 +86,18 @@ func (l *List) Skip(id, reason string, at time.Time) error {
 	return nil
 }
 
+// Open is true until the step is done, or skipped with a reason. Any other
+// status, such as one edited into state.json by hand, keeps it open, so
+// it still blocks SAFE TO WIPE.
+func (e Entry) Open() bool {
+	return e.Status != Done && (e.Status != Skipped || e.Reason == "")
+}
+
+// Pending returns the open steps.
 func (l List) Pending() []Entry {
 	var out []Entry
 	for _, e := range l.Entries {
-		if e.Status == Pending {
+		if e.Open() {
 			out = append(out, e)
 		}
 	}

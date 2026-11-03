@@ -70,3 +70,14 @@ func TestChecklistQuotesAnIdWithSpacesInItsCommand(t *testing.T) {
 		t.Errorf("output missing %q:\n%s", want, out.String())
 	}
 }
+
+func TestChecklistShowsAStepSkippedWithoutAReasonAsOpen(t *testing.T) {
+	l := checklist.List{Entries: []checklist.Entry{{Item: checklist.Item{ID: "system:license:dash", Title: "Reactivate the Dash license"}, Status: checklist.Skipped}}}
+	var out bytes.Buffer
+	Checklist(&out, l, false)
+	for _, want := range []string{"1 step open", "☐ Reactivate the Dash license", "→ mtm checklist done 'system:license:dash'"} {
+		if !strings.Contains(out.String(), want) {
+			t.Errorf("output missing %q:\n%s", want, out.String())
+		}
+	}
+}

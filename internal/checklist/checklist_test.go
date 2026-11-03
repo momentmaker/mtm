@@ -70,3 +70,29 @@ func TestUnknownIDsAreErrors(t *testing.T) {
 		t.Errorf("Skip err = %v", err)
 	}
 }
+
+// TestOnlyDoneOrSkippedWithAReasonIsClosed fails closed: state.json is a
+// file the user can edit, and anything else must keep blocking SAFE TO
+// WIPE.
+func TestOnlyDoneOrSkippedWithAReasonIsClosed(t *testing.T) {
+	tests := []struct {
+		name  string
+		entry Entry
+		open  bool
+	}{
+		{"pending", Entry{Item: license, Status: Pending}, true},
+		{"done", Entry{Item: license, Status: Done}, false},
+		{"skipped with a reason", Entry{Item: license, Status: Skipped, Reason: "sold it"}, false},
+		{"skipped without a reason", Entry{Item: license, Status: Skipped}, true},
+		{"no status", Entry{Item: license}, true},
+		{"unknown status", Entry{Item: license, Status: "later"}, true},
+	}
+	for _, tt := range tests {
+		t.Run(tt.name, func(t *testing.T) {
+			l := List{Entries: []Entry{tt.entry}}
+			if open := len(l.Pending()) == 1; open != tt.open {
+				t.Errorf("open = %v, want %v", open, tt.open)
+			}
+		})
+	}
+}
