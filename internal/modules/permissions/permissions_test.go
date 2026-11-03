@@ -2,6 +2,8 @@ package permissions
 
 import (
 	"context"
+	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"testing"
@@ -13,13 +15,10 @@ import (
 	"github.com/momentmaker/mtm/internal/manifest"
 	"github.com/momentmaker/mtm/internal/module"
 	"github.com/momentmaker/mtm/internal/runner"
+	"github.com/momentmaker/mtm/internal/testutil"
 )
 
-const (
-	home     = "/Users/dev"
-	systemDB = "/Library/Application Support/com.apple.TCC/TCC.db"
-	link26   = "x-apple.systempreferences:com.apple.settings.PrivacySecurity.extension?"
-)
+const link26 = "x-apple.systempreferences:com.apple.settings.PrivacySecurity.extension?"
 
 // userRows and systemRows are sqlite3 -json output for this module's query:
 // a granted Accessibility for Raycast, Automation from iTerm to System
@@ -30,9 +29,11 @@ const userRows = `[{"service":"kTCCServiceAppleEvents","client":"com.googlecode.
 const systemRows = `[{"service":"kTCCServiceAccessibility","client":"com.raycast.macos","client_type":0,"target":"UNUSED"},
 {"service":"kTCCServiceSystemPolicyAllFiles","client":"/usr/local/bin/backup-tool","client_type":1,"target":"UNUSED"}]`
 
-var denied = runner.Response{Code: 1, Stderr: `Error: unable to open database "` + systemDB + `": authorization denied`}
+var denied = runner.Response{Code: 1, Stderr: `Error: unable to open database "TCC.db": authorization denied`}
 
-var missing = runner.Response{Code: 1, Stderr: `Error: unable to open database "/Users/dev/Library/Application Support/com.apple.TCC/TCC.db": unable to open database file`}
+// cantOpen is sqlite3's message for an open it failed for no more specific
+// reason, a missing file among them.
+var cantOpen = runner.Response{Code: 1, Stderr: `Error: unable to open database "TCC.db": unable to open database file`}
 
 func testCatalog(t *testing.T) *catalog.Catalog {
 	t.Helper()
@@ -49,12 +50,24 @@ func testCatalog(t *testing.T) *catalog.Catalog {
 type fixture struct {
 	mod  Module
 	fake *runner.Fake
+	home string
 }
 
+// newFixture is a Mac in a temporary folder, never the real privacy
+// databases. Both databases exist, as empty files, so the module asks
+// sqlite3 about them, and the fake answers for sqlite3.
 func newFixture(t *testing.T) fixture {
-	f := fixture{mod: Module{Catalog: testCatalog(t), SystemDB: systemDB}, fake: &runner.Fake{Responses: map[string]runner.Response{
-		"/usr/bin/sw_vers -productVersion": {Stdout: "26.7.1\n"},
-	}}}
+	t.Helper()
+	root := t.TempDir()
+	f := fixture{
+		mod: Module{Catalog: testCatalog(t), SystemDB: filepath.Join(root, "Library", "Application Support", "com.apple.TCC", "TCC.db")},
+		fake: &runner.Fake{Responses: map[string]runner.Response{
+			"/usr/bin/sw_vers -productVersion": {Stdout: "26.7.1\n"},
+		}},
+		home: filepath.Join(root, "Users", "dev"),
+	}
+	testutil.WriteFile(t, userDB(f.home), "")
+	testutil.WriteFile(t, f.mod.SystemDB, "")
 	f.answer(runner.Response{Stdout: userRows}, runner.Response{Stdout: systemRows})
 	return f
 }
@@ -64,12 +77,12 @@ func sqlite(db string) string {
 }
 
 func (f fixture) answer(user, system runner.Response) {
-	f.fake.Responses[sqlite(userDB(home))] = user
-	f.fake.Responses[sqlite(systemDB)] = system
+	f.fake.Responses[sqlite(userDB(f.home))] = user
+	f.fake.Responses[sqlite(f.mod.SystemDB)] = system
 }
 
 func (f fixture) env(m *manifest.Manifest) module.Env {
-	return module.Env{Ctx: context.Background(), Run: f.fake, Home: home, Manifest: m}
+	return module.Env{Ctx: context.Background(), Run: f.fake, Home: f.home, Manifest: m}
 }
 
 // record is a manifest holding this module's inventory and the system
@@ -259,13 +272,46 @@ func TestVerifyWithNothingExpectedHasNoChecks(t *testing.T) {
 
 func TestPrepareTreatsAMissingUserDatabaseAsNoGrants(t *testing.T) {
 	f := newFixture(t)
-	f.answer(missing, runner.Response{Stdout: systemRows})
+	if err := os.Remove(userDB(f.home)); err != nil {
+		t.Fatal(err)
+	}
+	f.answer(cantOpen, runner.Response{Stdout: systemRows})
 	res, err := f.mod.Prepare(f.env(nil), nil)
 	if err != nil {
 		t.Fatal(err)
 	}
 	if inv := res.Inventory.(Inventory); inv.Source != "tcc" || len(inv.Grants) != 2 {
 		t.Errorf("inventory = %+v", inv)
+	}
+}
+
+func TestPrepareFailsWhenADatabaseThatExistsWontOpen(t *testing.T) {
+	f := newFixture(t)
+	f.answer(cantOpen, runner.Response{Stdout: systemRows})
+	if _, err := f.mod.Prepare(f.env(nil), nil); err == nil || !strings.Contains(err.Error(), "unable to open database file") {
+		t.Errorf("err = %v, want the sqlite3 error", err)
+	}
+}
+
+// Without Full Disk Access, macOS may refuse even to look for the file.
+// That is no answer about whether it exists, so sqlite3 still decides.
+func TestPrepareLeavesADatabaseItCantLookForToSqlite3(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root can look in any folder")
+	}
+	f := newFixture(t)
+	dir := filepath.Dir(userDB(f.home))
+	if err := os.Chmod(dir, 0); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.Chmod(dir, 0o755) })
+	f.answer(denied, runner.Response{Stdout: systemRows})
+	res, err := f.mod.Prepare(f.env(nil), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if inv := res.Inventory.(Inventory); inv.Source != "catalog" {
+		t.Errorf("inventory = %+v, want the catalog fallback", inv)
 	}
 }
 

@@ -7,6 +7,8 @@ import (
 	"encoding/json"
 	"errors"
 	"fmt"
+	"io/fs"
+	"os"
 	"path/filepath"
 	"slices"
 	"strings"
@@ -76,16 +78,18 @@ func (m Module) read(env module.Env) (grants []Grant, readable bool, err error) 
 	return grants, true, nil
 }
 
+// readDB counts a database as holding no grants only when its file is
+// missing, as on a new account. sqlite3's "unable to open database file"
+// covers other failures to open too, which must not pass for an empty
+// database.
 func (m Module) readDB(env module.Env, db string) ([]Grant, bool, error) {
+	if _, err := os.Lstat(db); errors.Is(err, fs.ErrNotExist) {
+		return nil, true, nil
+	}
 	out, err := env.Run.Run(env.Ctx, runner.Command{Name: "/usr/bin/sqlite3", Args: []string{"-init", "/dev/null", "-readonly", "-json", db, query}})
 	var ee *runner.ExitError
-	if errors.As(err, &ee) {
-		switch {
-		case strings.Contains(ee.Stderr, "authorization denied"):
-			return nil, false, nil
-		case strings.Contains(ee.Stderr, "unable to open database file"):
-			return nil, true, nil
-		}
+	if errors.As(err, &ee) && strings.Contains(ee.Stderr, "authorization denied") {
+		return nil, false, nil
 	}
 	if err != nil {
 		return nil, false, fmt.Errorf("read %s: %w", db, err)
