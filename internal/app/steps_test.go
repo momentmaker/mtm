@@ -64,7 +64,7 @@ func TestOpenStepRefusesALinkMtmDidntMake(t *testing.T) {
 	odd.Link = "file:///Applications/Calculator.app"
 	home := savedSteps(t, odd)
 	a := stepApp(home, newUUID)
-	if err := a.OpenStep(ctx, odd.ID); err == nil || !strings.Contains(err.Error(), "only System Settings links") {
+	if err := a.OpenStep(ctx, odd.ID); !errors.Is(err, ErrRefusedLink) {
 		t.Errorf("err = %v", err)
 	}
 	if len(a.Runner.(*runner.Fake).Calls()) != 0 {

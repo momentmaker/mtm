@@ -2,6 +2,9 @@ package main
 
 import (
 	"bytes"
+	"context"
+	"io"
+	"os"
 	"strings"
 	"testing"
 	"time"
@@ -150,5 +153,55 @@ func TestChecklistWithoutAnMtmFolder(t *testing.T) {
 	}
 	if code := run(ctx, []string{"checklist"}, &out, &errOut, newApp); code != exitFailed || !strings.Contains(errOut.String(), "run mtm prepare") {
 		t.Errorf("exit %d, stderr %q", code, errOut.String())
+	}
+}
+
+func TestChecklistOpenRefusalsExitAsProblemsAndEscapeText(t *testing.T) {
+	_, newApp := checklistHome(t)
+	st, err := stage.Open(os.Getenv("HOME"))
+	if err != nil {
+		t.Fatal(err)
+	}
+	s, err := state.Load(st)
+	if err != nil {
+		t.Fatal(err)
+	}
+	s.Checklist.Add(
+		checklist.Item{ID: "x:nolink", Title: "No link", Where: "Evil \x1b[2J place"},
+		checklist.Item{ID: "x:odd", Title: "Odd link", Link: "file:///Applications/Calculator.app"},
+	)
+	if err := state.Save(st, s); err != nil {
+		t.Fatal(err)
+	}
+	for _, id := range []string{"x:nolink", "x:odd"} {
+		var out, errOut bytes.Buffer
+		if code := run(ctx, []string{"checklist", "open", id}, &out, &errOut, newApp); code != exitProblems {
+			t.Errorf("%s: exit %d, want %d", id, code, exitProblems)
+		}
+		if strings.ContainsRune(errOut.String(), 0x1b) {
+			t.Errorf("%s: raw ESC in stderr %q", id, errOut.String())
+		}
+	}
+}
+
+func TestChecklistWalkStopsWhenCancelled(t *testing.T) {
+	_, newApp := checklistHome(t)
+	pr, pw := io.Pipe()
+	t.Cleanup(func() { pw.Close() })
+	oldIn, oldInteractive := stdin, interactive
+	stdin, interactive = pr, func() bool { return true }
+	t.Cleanup(func() { stdin, interactive = oldIn, oldInteractive })
+	cctx, cancel := context.WithCancel(ctx)
+	var out, errOut bytes.Buffer
+	finished := make(chan int)
+	go func() { finished <- run(cctx, []string{"checklist"}, &out, &errOut, newApp) }()
+	cancel()
+	select {
+	case code := <-finished:
+		if code != exitOK {
+			t.Errorf("exit %d: %s", code, errOut.String())
+		}
+	case <-time.After(5 * time.Second):
+		t.Fatal("walk did not return after cancel")
 	}
 }

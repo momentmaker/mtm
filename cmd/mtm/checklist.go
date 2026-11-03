@@ -125,6 +125,9 @@ func openStep(ctx context.Context, a *app.App, args []string, stderr io.Writer) 
 	}
 	if err := a.OpenStep(ctx, args[0]); err != nil {
 		fmt.Fprintln(stderr, "mtm checklist open:", err)
+		if errors.Is(err, app.ErrRefusedLink) || errors.Is(err, app.ErrNoLink) {
+			return exitProblems
+		}
 		return exitFailed
 	}
 	return exitOK
@@ -152,7 +155,7 @@ func walk(ctx context.Context, a *app.App, in io.Reader, stdout, stderr io.Write
 				fmt.Fprintln(stdout, "  Could not open it:", err)
 			}
 		}
-		if quit := ask(a, r, e, stdout); quit {
+		if quit := ask(ctx, a, r, e, stdout); quit {
 			break
 		}
 	}
@@ -168,10 +171,10 @@ func walk(ctx context.Context, a *app.App, in io.Reader, stdout, stderr io.Write
 
 // ask reads answers until one settles the step, and reports a quit or the
 // end of input.
-func ask(a *app.App, r *bufio.Reader, e checklist.Entry, out io.Writer) bool {
+func ask(ctx context.Context, a *app.App, r *bufio.Reader, e checklist.Entry, out io.Writer) bool {
 	for {
 		fmt.Fprint(out, "  [d]one, [s]kip, [l]ater, [q]uit? ")
-		answer, err := readLine(r)
+		answer, err := readLine(ctx, r)
 		if err != nil {
 			return true
 		}
@@ -184,7 +187,7 @@ func ask(a *app.App, r *bufio.Reader, e checklist.Entry, out io.Writer) bool {
 			return false
 		case "s", "skip":
 			fmt.Fprint(out, "  Why doesn't it apply? ")
-			reason, err := readLine(r)
+			reason, err := readLine(ctx, r)
 			if err != nil {
 				return true
 			}
@@ -201,10 +204,25 @@ func ask(a *app.App, r *bufio.Reader, e checklist.Entry, out io.Writer) bool {
 	}
 }
 
-func readLine(r *bufio.Reader) (string, error) {
-	line, err := r.ReadString('\n')
-	if err != nil && (line == "" || !errors.Is(err, io.EOF)) {
-		return "", err
+// readLine gives up when ctx is done: Ctrl-C cancels ctx but cannot
+// interrupt a read blocked on the terminal.
+func readLine(ctx context.Context, r *bufio.Reader) (string, error) {
+	type result struct {
+		line string
+		err  error
 	}
-	return strings.TrimSpace(line), nil
+	done := make(chan result, 1)
+	go func() {
+		line, err := r.ReadString('\n')
+		done <- result{line, err}
+	}()
+	select {
+	case <-ctx.Done():
+		return "", ctx.Err()
+	case res := <-done:
+		if res.err != nil && (res.line == "" || !errors.Is(res.err, io.EOF)) {
+			return "", res.err
+		}
+		return strings.TrimSpace(res.line), nil
+	}
 }

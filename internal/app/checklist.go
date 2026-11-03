@@ -17,7 +17,10 @@ import (
 // could edit to point open at something else.
 const settingsLink = "x-apple.systempreferences:"
 
-var ErrNoLink = errors.New("this step has no link to open")
+var (
+	ErrNoLink      = errors.New("this step has no link to open")
+	ErrRefusedLink = errors.New("mtm opens only System Settings links")
+)
 
 // Checklist returns the steps finish left on this Mac, with what the user
 // did with each.
@@ -74,13 +77,13 @@ func (a *App) OpenStep(ctx context.Context, id string) error {
 		return fmt.Errorf("%w: %s", checklist.ErrUnknownItem, id)
 	}
 	if e.Link == "" {
-		return fmt.Errorf("%w; do it in %s", ErrNoLink, e.Where)
+		return fmt.Errorf("%w; do it in %q", ErrNoLink, e.Where)
 	}
 	if !strings.HasPrefix(e.Link, settingsLink) {
-		return fmt.Errorf("refusing to open %q: mtm opens only System Settings links", e.Link)
+		return fmt.Errorf("%w; refusing %q", ErrRefusedLink, e.Link)
 	}
 	if _, err := a.Runner.Run(ctx, runner.Command{Name: "/usr/bin/open", Args: []string{e.Link}}); err != nil {
-		return fmt.Errorf("open %s: %w", e.Where, err)
+		return fmt.Errorf("open %q: %w", e.Where, err)
 	}
 	return nil
 }
