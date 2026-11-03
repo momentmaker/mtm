@@ -23,23 +23,34 @@ const waitDelay = 2 * time.Second
 type Exec struct{}
 
 func (Exec) Run(ctx context.Context, cmd Command) (Output, error) {
+	if cmd.Stdin != "" && cmd.Input != nil {
+		return Output{}, fmt.Errorf("%s: both Stdin and Input are set", Display(cmd))
+	}
 	c := exec.CommandContext(ctx, cmd.Name, cmd.Args...)
 	c.WaitDelay = waitDelay
 	c.Dir = cmd.Dir
 	if len(cmd.Env) > 0 || len(cmd.Unset) > 0 {
 		c.Env = append(without(os.Environ(), cmd.Unset), cmd.Env...)
 	}
-	if cmd.Stdin != "" {
+	switch {
+	case cmd.Input != nil:
+		c.Stdin = cmd.Input
+	case cmd.Stdin != "":
 		c.Stdin = strings.NewReader(cmd.Stdin)
 	}
 	var stdout, stderr bytes.Buffer
 	c.Stdout = &stdout
+	if cmd.Stdout != nil {
+		c.Stdout = cmd.Stdout
+	}
 	c.Stderr = &stderr
 	err := c.Run()
 	out := Output{Stdout: stdout.Bytes(), Stderr: stderr.Bytes()}
-	if errors.Is(err, exec.ErrWaitDelay) && c.ProcessState != nil && c.ProcessState.Success() {
+	if errors.Is(err, exec.ErrWaitDelay) && c.ProcessState != nil && c.ProcessState.Success() && cmd.Stdout == nil {
 		// The command exited 0 and only a child it left behind held the
 		// pipes; anything that child writes later is dropped, not waited for.
+		// A streamed export gets no such pass: output still in flight would
+		// be cut off, and the archive saved short.
 		return out, nil
 	}
 	if err == nil {

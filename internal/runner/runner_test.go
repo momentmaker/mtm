@@ -133,3 +133,49 @@ func TestLoggedRedactsSecrets(t *testing.T) {
 		t.Errorf("log missing command or exit status:\n%s", got)
 	}
 }
+
+func TestExecStreamsInputAndOutput(t *testing.T) {
+	var got bytes.Buffer
+	out, err := Exec{}.Run(context.Background(), Command{
+		Name:   "/bin/cat",
+		Input:  strings.NewReader("streamed\n"),
+		Stdout: &got,
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.String() != "streamed\n" || len(out.Stdout) != 0 {
+		t.Errorf("streamed %q, Output.Stdout %q; want %q and nothing", got.String(), out.Stdout, "streamed\n")
+	}
+}
+
+func TestExecRefusesStdinAndInputTogether(t *testing.T) {
+	_, err := Exec{}.Run(context.Background(), Command{Name: "/bin/cat", Stdin: "a", Input: strings.NewReader("b")})
+	if err == nil || !strings.Contains(err.Error(), "both Stdin and Input") {
+		t.Errorf("err = %v, want both Stdin and Input", err)
+	}
+}
+
+func TestExecFailsAStreamCutOffByABackgroundChild(t *testing.T) {
+	var got bytes.Buffer
+	_, err := Exec{}.Run(context.Background(), Command{Name: "/bin/sh", Args: []string{"-c", "sleep 5 & echo hi"}, Stdout: &got})
+	if err == nil {
+		t.Error("a streamed command whose output was cut off reported success")
+	}
+}
+
+func TestFakeStreamsOutputAndRecordsInput(t *testing.T) {
+	f := &Fake{Responses: map[string]Response{"/bin/cat": {Stdout: "canned"}}}
+	var got bytes.Buffer
+	out, err := f.Run(context.Background(), Command{Name: "/bin/cat", Input: strings.NewReader("sent"), Stdout: &got})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if got.String() != "canned" || len(out.Stdout) != 0 {
+		t.Errorf("streamed %q, Output.Stdout %q; want %q and nothing", got.String(), out.Stdout, "canned")
+	}
+	calls := f.Calls()
+	if len(calls) != 1 || calls[0].Stdin != "sent" || calls[0].Input != nil {
+		t.Errorf("calls = %+v, want one with Stdin %q and no Input", calls, "sent")
+	}
+}

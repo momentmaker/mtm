@@ -6,6 +6,7 @@ import (
 	"context"
 	"errors"
 	"fmt"
+	"io"
 	"strings"
 
 	"github.com/momentmaker/mtm/internal/redact"
@@ -13,14 +14,19 @@ import (
 
 // Command is one system command. Unset names variables removed from the
 // current environment, and Env entries are then appended to it. Stdin,
-// when set, is written to the command's standard input.
+// when set, is written to the command's standard input. Input streams
+// standard input instead, and Stdout, when set, receives standard output
+// as it arrives rather than in Output.Stdout: exports can be larger than
+// memory. A command sets Stdin or Input, not both.
 type Command struct {
-	Name  string
-	Args  []string
-	Dir   string
-	Unset []string
-	Env   []string
-	Stdin string
+	Name   string
+	Args   []string
+	Dir    string
+	Unset  []string
+	Env    []string
+	Stdin  string
+	Input  io.Reader
+	Stdout io.Writer
 }
 
 // String is the unredacted command line. Fake uses it as the lookup key.
