@@ -252,6 +252,18 @@ func TestDefaultAppModules(t *testing.T) {
 	}
 }
 
+func TestDefaultAppModulesThatLeaveSteps(t *testing.T) {
+	var names []string
+	for _, m := range defaultApp(t.TempDir()).Modules {
+		if _, ok := m.(module.Stepper); ok {
+			names = append(names, m.Name())
+		}
+	}
+	if want := []string{"system", "loginitems", "permissions"}; !slices.Equal(names, want) {
+		t.Errorf("modules with steps = %q, want %q", names, want)
+	}
+}
+
 func TestFinishFlagRules(t *testing.T) {
 	tests := []struct {
 		args []string

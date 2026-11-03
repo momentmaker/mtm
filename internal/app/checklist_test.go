@@ -1,6 +1,7 @@
 package app
 
 import (
+	"errors"
 	"slices"
 	"testing"
 	"time"
@@ -14,11 +15,16 @@ import (
 var (
 	grantStep   = checklist.Item{ID: "steps:grant", Module: "steps", Title: "Give Raycast Accessibility access"}
 	licenseStep = checklist.Item{ID: "steps:license", Module: "steps", Title: "Reactivate Dash"}
+	noteStep    = checklist.Item{ID: "steps:note", Module: "steps", Title: "Sign in to Dash again"}
 )
 
-// stepsModule leaves two checklist steps in finish. Its verify check
-// passes and proves the grant step done when grants is set.
-type stepsModule struct{ grants bool }
+// stepsModule leaves the grant and license steps, and any extra ones, as a
+// newer catalog might. Its verify check passes and proves the grant step
+// done when grants is set.
+type stepsModule struct {
+	grants bool
+	extra  []checklist.Item
+}
 
 func (stepsModule) Name() string                              { return "steps" }
 func (stepsModule) Scan(module.Env) ([]module.Finding, error) { return nil, nil }
@@ -26,7 +32,10 @@ func (stepsModule) Prepare(module.Env, *stage.Stage) (module.Result, error) {
 	return module.Result{Inventory: true}, nil
 }
 func (stepsModule) Finish(module.Env, *stage.Stage) (module.Result, error) {
-	return module.Result{Checklist: []checklist.Item{grantStep, licenseStep}}, nil
+	return module.Result{}, nil
+}
+func (m stepsModule) Steps(module.Env) ([]checklist.Item, error) {
+	return append([]checklist.Item{grantStep, licenseStep}, m.extra...), nil
 }
 func (m stepsModule) Verify(module.Env, *stage.Stage) ([]module.Check, error) {
 	c := module.Check{Module: "steps", ID: "steps:grants", Status: module.StatusWarn, Title: "grants"}
@@ -111,5 +120,95 @@ func TestVerifyIsSafeOnceEveryStepIsClosed(t *testing.T) {
 	rep, err := stepApp(newHome, newUUID, stepsModule{grants: true}).Verify(ctx, VerifyOptions{})
 	if err != nil || !rep.Verdict.Safe {
 		t.Errorf("verify = %+v, %v; want SAFE", rep.Verdict, err)
+	}
+}
+
+// brokenSteps can't list its steps, as when its part of the record is
+// damaged.
+type brokenSteps struct{ finishOnly }
+
+func (brokenSteps) Steps(module.Env) ([]checklist.Item, error) {
+	return nil, errors.New("record is damaged")
+}
+
+func TestVerifyListsStepsEvenWhenFinishNeverRan(t *testing.T) {
+	old := t.TempDir()
+	mustPrepare(t, stepApp(old, oldUUID, stepsModule{}))
+	newHome := migrate(t, old)
+	rep, err := stepApp(newHome, newUUID, stepsModule{}).Verify(ctx, VerifyOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{grantStep.Title, licenseStep.Title}; rep.Verdict.Safe || !slices.Equal(rep.Verdict.Pending, want) {
+		t.Errorf("verdict = %+v, want NOT SAFE with %q open", rep.Verdict, want)
+	}
+}
+
+func TestVerifyOnlyListsTheStepsOfModulesItSkips(t *testing.T) {
+	old := t.TempDir()
+	plain := finishOnly{name: "plain"}
+	mustPrepare(t, stepApp(old, oldUUID, stepsModule{}, plain))
+	newHome := migrate(t, old)
+	rep, err := stepApp(newHome, newUUID, stepsModule{}, plain).Verify(ctx, VerifyOptions{Only: []string{"plain"}})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := []string{grantStep.Title, licenseStep.Title}; !slices.Equal(rep.Verdict.Pending, want) {
+		t.Errorf("pending = %q, want %q", rep.Verdict.Pending, want)
+	}
+}
+
+func TestVerifyFailsWhenAModuleCannotListItsSteps(t *testing.T) {
+	old := t.TempDir()
+	broken := brokenSteps{finishOnly{name: "broken"}}
+	mustPrepare(t, stepApp(old, oldUUID, broken))
+	rep, err := stepApp(migrate(t, old), newUUID, broken).Verify(ctx, VerifyOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if rep.Verdict.Safe || !slices.Contains(blockingIDs(rep), "broken:steps") {
+		t.Errorf("safe = %v, blocking = %v; want broken:steps blocking", rep.Verdict.Safe, blockingIDs(rep))
+	}
+}
+
+func TestFinishSavesTheStepsOfModulesThatCanListThem(t *testing.T) {
+	old := t.TempDir()
+	broken := brokenSteps{finishOnly{name: "broken"}}
+	mustPrepare(t, stepApp(old, oldUUID, broken, stepsModule{}))
+	newHome := migrate(t, old)
+	rep, err := stepApp(newHome, newUUID, broken, stepsModule{}).Finish(ctx, FinishOptions{})
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.ContainsFunc(rep.Problems, func(f module.Finding) bool {
+		return f.ID == "broken:error" && f.Severity == module.SeverityBlocker && f.Title == "broken: list checklist steps failed"
+	}) {
+		t.Errorf("problems = %+v, want a blocker for broken's steps", rep.Problems)
+	}
+	if n := len(loadState(t, newHome).Checklist.Pending()); n != 2 {
+		t.Errorf("%d steps saved, want stepsModule's 2", n)
+	}
+}
+
+func TestFinishThatAddsAStepNeedsAnotherVerifyBeforeCleanup(t *testing.T) {
+	old := t.TempDir()
+	mustPrepare(t, stepApp(old, oldUUID, stepsModule{}))
+	newHome := migrate(t, old)
+	a := stepApp(newHome, newUUID, stepsModule{grants: true})
+	if _, err := a.Finish(ctx, FinishOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	if err := a.Skip(licenseStep.ID, "sold the license"); err != nil {
+		t.Fatal(err)
+	}
+	if rep, err := a.Verify(ctx, VerifyOptions{}); err != nil || !rep.Verdict.Safe {
+		t.Fatalf("verify = %+v, %v; want SAFE", rep.Verdict, err)
+	}
+	newer := stepApp(newHome, newUUID, stepsModule{grants: true, extra: []checklist.Item{noteStep}})
+	if _, err := newer.Finish(ctx, FinishOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := newer.Cleanup(false); !errors.Is(err, ErrNotVerified) {
+		t.Errorf("cleanup after finish added a step: %v, want ErrNotVerified", err)
 	}
 }

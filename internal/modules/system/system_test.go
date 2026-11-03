@@ -324,11 +324,11 @@ func TestVerifyAndFinishTreatAnUnreadableRecordedEtcFileAsDiffering(t *testing.T
 	}
 }
 
-func TestFinishListsTheCatalogsStepsForRecordedApps(t *testing.T) {
+func TestStepsAreTheCatalogsForRecordedApps(t *testing.T) {
 	f := newFixture(t)
 	f.addApp(t, "Dash.app", "com.kapeli.dashdoc", "7.3", "Dash", "arm64")
 	f.addApp(t, "Signal.app", "org.whispersystems.signal-desktop", "7.80", "Signal", "arm64")
-	m, st, _ := f.prepare(t)
+	m, _, _ := f.prepare(t)
 	c, err := catalog.Load(fstest.MapFS{
 		"dash.toml":   {Data: []byte("id = \"dash\"\nname = \"Dash\"\nbundle_id = \"com.kapeli.dashdoc\"\n\n[license]\nreactivate = true\nnote = \"Enter your license.\"\n")},
 		"signal.toml": {Data: []byte("id = \"signal\"\nname = \"Signal\"\nbundle_id = \"org.whispersystems.signal-desktop\"\nnotes = [\"Link it again.\"]\n")},
@@ -338,7 +338,7 @@ func TestFinishListsTheCatalogsStepsForRecordedApps(t *testing.T) {
 	}
 	mod := f.module()
 	mod.Catalog = c
-	res, err := mod.Finish(f.env(m), st)
+	items, err := mod.Steps(f.env(m))
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -346,7 +346,7 @@ func TestFinishListsTheCatalogsStepsForRecordedApps(t *testing.T) {
 		{ID: "system:license:dash", Module: Name, Title: "Reactivate the Dash license", Detail: "Enter your license.", Where: "Dash"},
 		{ID: "system:note:signal:1", Module: Name, Title: "Signal: Link it again.", Where: "Signal"},
 	}
-	if !slices.Equal(res.Checklist, want) {
-		t.Errorf("checklist = %+v\nwant %+v", res.Checklist, want)
+	if !slices.Equal(items, want) {
+		t.Errorf("steps = %+v\nwant %+v", items, want)
 	}
 }

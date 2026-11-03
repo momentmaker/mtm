@@ -238,8 +238,9 @@ func (m Module) clientName(client string, path bool, apps []recordedApp) string 
 	return client
 }
 
-// steps are the checklist steps for the expected grants, one per grant.
-func (m Module) steps(env module.Env, inv Inventory) ([]checklist.Item, []Grant, error) {
+// grantSteps are the checklist steps for the expected grants, one per
+// grant.
+func (m Module) grantSteps(env module.Env, inv Inventory) ([]checklist.Item, []Grant, error) {
 	major, err := macos.MajorVersion(env.Ctx, env.Run)
 	if err != nil {
 		return nil, nil, err
@@ -261,19 +262,21 @@ func (m Module) steps(env module.Env, inv Inventory) ([]checklist.Item, []Grant,
 	return items, grants, nil
 }
 
-func (m Module) Finish(env module.Env, _ *stage.Stage) (module.Result, error) {
+func (m Module) Steps(env module.Env) ([]checklist.Item, error) {
 	var inv Inventory
 	if _, err := module.LoadInventory(env, Name, &inv); err != nil {
-		return module.Result{}, err
+		return nil, err
 	}
-	items, _, err := m.steps(env, inv)
+	items, _, err := m.grantSteps(env, inv)
+	return items, err
+}
+
+func (m Module) Finish(env module.Env, _ *stage.Stage) (module.Result, error) {
+	items, err := m.Steps(env)
 	if err != nil || len(items) == 0 {
 		return module.Result{}, err
 	}
-	return module.Result{
-		Checklist: items,
-		Done:      []string{"listed " + words.Count(len(items), "privacy permission", "privacy permissions") + " to grant again"},
-	}, nil
+	return module.Result{Done: []string{"listed " + words.Count(len(items), "privacy permission", "privacy permissions") + " to grant again"}}, nil
 }
 
 // Verify can check the grants only with Full Disk Access on this Mac too.
@@ -283,7 +286,7 @@ func (m Module) Verify(env module.Env, _ *stage.Stage) ([]module.Check, error) {
 	if _, err := module.LoadInventory(env, Name, &inv); err != nil {
 		return nil, err
 	}
-	items, grants, err := m.steps(env, inv)
+	items, grants, err := m.grantSteps(env, inv)
 	if err != nil || len(items) == 0 {
 		return nil, err
 	}

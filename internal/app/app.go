@@ -285,6 +285,15 @@ func (a *App) Verify(ctx context.Context, opts VerifyOptions) (VerifyReport, err
 	if err != nil {
 		return VerifyReport{}, err
 	}
+	// Every module's steps count, even with --only, since the verdict
+	// covers the whole checklist.
+	_, failed := mergeSteps(env, a.Modules, m, &s.Checklist)
+	for _, f := range failed {
+		checks = append(checks, module.Check{
+			Module: f.module, ID: f.module + ":steps", Status: module.StatusFail,
+			Title: f.module + ": could not list its checklist steps", Detail: f.err.Error(),
+		})
+	}
 	resolve(&s.Checklist, checks, a.Now())
 	v := verdict.Decide(checks, pendingTitles(s.Checklist))
 	s.LastVerify = &state.VerifyResult{At: a.Now(), Safe: v.Safe && len(opts.Only) == 0}
@@ -327,7 +336,6 @@ func (a *App) Finish(ctx context.Context, opts FinishOptions) (StepReport, error
 	env := a.env(ctx, module.NewMac, false, m, run, exportsFor(st, m))
 	env.Force, env.RestoreDump = opts.Force, opts.RestoreDump
 	var rep StepReport
-	var items []checklist.Item
 	for _, mod := range mods {
 		if _, ok := m.Modules[mod.Name()]; !ok {
 			continue
@@ -338,13 +346,20 @@ func (a *App) Finish(ctx context.Context, opts FinishOptions) (StepReport, error
 			continue
 		}
 		rep.add(mod.Name(), res)
-		items = append(items, res.Checklist...)
 	}
 	s, err := state.Load(st)
 	if err != nil {
 		return rep, err
 	}
-	s.Checklist.Add(items...)
+	added, failed := mergeSteps(env, mods, m, &s.Checklist)
+	for _, f := range failed {
+		rep.Problems = append(rep.Problems, moduleFailure(f.module, "list checklist steps", f.err))
+	}
+	if added > 0 {
+		// A SAFE TO WIPE from before these steps existed must not let
+		// cleanup run.
+		s.LastVerify = nil
+	}
 	if err := state.Save(st, s); err != nil {
 		return rep, err
 	}
@@ -352,8 +367,37 @@ func (a *App) Finish(ctx context.Context, opts FinishOptions) (StepReport, error
 	return rep, nil
 }
 
-// resolve marks done the checklist steps a passing check proved done. A
-// step finish never added, because finish hasn't run, has nothing to mark.
+// stepsFailure is a module whose checklist steps couldn't be listed.
+type stepsFailure struct {
+	module string
+	err    error
+}
+
+// mergeSteps adds to l the steps each recorded module in mods leaves for
+// the user, and returns how many were new. A module that can't list its
+// steps doesn't keep the others' from being added.
+func mergeSteps(env module.Env, mods []module.Module, m *manifest.Manifest, l *checklist.List) (int, []stepsFailure) {
+	added := 0
+	var failed []stepsFailure
+	for _, mod := range mods {
+		stepper, ok := mod.(module.Stepper)
+		if !ok {
+			continue
+		}
+		if _, recorded := m.Modules[mod.Name()]; !recorded {
+			continue
+		}
+		items, err := stepper.Steps(env)
+		if err != nil {
+			failed = append(failed, stepsFailure{module: mod.Name(), err: err})
+			continue
+		}
+		added += l.Add(items...)
+	}
+	return added, failed
+}
+
+// resolve marks done the checklist steps a passing check proved done.
 func resolve(l *checklist.List, checks []module.Check, at time.Time) {
 	for _, c := range checks {
 		if c.Status != module.StatusPass {

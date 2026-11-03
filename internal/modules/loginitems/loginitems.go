@@ -190,8 +190,15 @@ func (m Module) Finish(env module.Env, _ *stage.Stage) (module.Result, error) {
 	if len(ok) > 0 {
 		res.Done = append(res.Done, "loaded "+strings.Join(ok, ", "))
 	}
-	res.Checklist = loginItemSteps(env, old)
 	return res, nil
+}
+
+func (Module) Steps(env module.Env) ([]checklist.Item, error) {
+	var old Inventory
+	if _, err := module.LoadInventory(env, Name, &old); err != nil {
+		return nil, err
+	}
+	return loginItemSteps(env, old), nil
 }
 
 // loginItemSteps asks the user to add each login item back: macOS keeps
@@ -199,7 +206,7 @@ func (m Module) Finish(env module.Env, _ *stage.Stage) (module.Result, error) {
 // couldn't read the list, the step is to read it on the old Mac first.
 func loginItemSteps(env module.Env, old Inventory) []checklist.Item {
 	// The link is optional: without the version there is no link, but the
-	// steps and the work finish already did must not be lost.
+	// steps must not be lost.
 	major, err := macos.MajorVersion(env.Ctx, env.Run)
 	if err != nil {
 		major = ""

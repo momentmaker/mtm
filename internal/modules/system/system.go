@@ -225,8 +225,15 @@ func (m Module) Finish(env module.Env, st *stage.Stage) (module.Result, error) {
 	if len(res.Problems) == 0 {
 		res.Done = []string{"login shell, /etc files, and Rosetta are as they were"}
 	}
-	res.Checklist = m.appSteps(old.Apps)
 	return res, nil
+}
+
+func (m Module) Steps(env module.Env) ([]checklist.Item, error) {
+	var old Inventory
+	if _, err := module.LoadInventory(env, Name, &old); err != nil {
+		return nil, err
+	}
+	return m.appSteps(old.Apps), nil
 }
 
 // appSteps are what the catalog says the old Mac's apps need by hand on a

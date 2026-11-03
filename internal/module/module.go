@@ -89,13 +89,11 @@ type Check struct {
 
 // Result is what Prepare and Finish return. Inventory is stored in the
 // manifest under the module's name. A Problems entry with SeverityBlocker
-// makes the run NOT READY. Checklist holds the steps Finish leaves to the
-// user, which verify counts until each is done or skipped.
+// makes the run NOT READY.
 type Result struct {
 	Inventory any
 	Done      []string
 	Problems  []Finding
-	Checklist []checklist.Item
 }
 
 type Module interface {
@@ -104,6 +102,13 @@ type Module interface {
 	Prepare(env Env, st *stage.Stage) (Result, error)
 	Finish(env Env, st *stage.Stage) (Result, error)
 	Verify(env Env, st *stage.Stage) ([]Check, error)
+}
+
+// Stepper is implemented by modules that leave steps for the user on the
+// new Mac. Steps works from the record alone, so verify can list them
+// even when finish didn't run, or ran with --only.
+type Stepper interface {
+	Steps(env Env) ([]checklist.Item, error)
 }
 
 // Undoer is implemented by modules whose prepare changes the old Mac, so

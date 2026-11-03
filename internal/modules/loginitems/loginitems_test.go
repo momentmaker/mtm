@@ -93,7 +93,7 @@ func TestScanDoesNotAskSystemEvents(t *testing.T) {
 	}
 }
 
-func TestFinishLoadsAgentsAndListsLoginItems(t *testing.T) {
+func TestFinishLoadsAgents(t *testing.T) {
 	f := newFixture(t)
 	f.fake.Responses["/bin/launchctl list"] = runner.Response{Stdout: "PID\tStatus\tLabel\n"}
 	plist := filepath.Join(f.home, "Library", "LaunchAgents", "a.plist")
@@ -109,29 +109,32 @@ func TestFinishLoadsAgentsAndListsLoginItems(t *testing.T) {
 	if len(res.Problems) != 0 {
 		t.Errorf("problems = %+v, want login items as checklist steps instead", res.Problems)
 	}
-	want := []checklist.Item{{ID: "loginitems:Raycast", Module: Name, Title: "Add Raycast to Login Items again",
-		Where: "System Settings > General > Login Items & Extensions", Link: "x-apple.systempreferences:com.apple.LoginItems-Settings.extension"}}
-	if !slices.Equal(res.Checklist, want) {
-		t.Errorf("checklist = %+v, want %+v", res.Checklist, want)
-	}
 }
 
-func TestFinishKeepsStepsAndDoneWhenMacOSVersionIsUnknown(t *testing.T) {
+func TestStepsAddEachLoginItemBack(t *testing.T) {
 	f := newFixture(t)
-	f.fake.Responses["/bin/launchctl list"] = runner.Response{Stdout: "PID\tStatus\tLabel\n"}
-	f.fake.Responses["/usr/bin/sw_vers -productVersion"] = runner.Response{Code: 1}
-	plist := filepath.Join(f.home, "Library", "LaunchAgents", "a.plist")
-	f.fake.Responses["/bin/launchctl bootstrap gui/501 "+plist] = runner.Response{}
-	m := record(t, Inventory{Agents: []Agent{{File: "a.plist", Label: "com.a", Loaded: true}}, LoginItems: []string{"Raycast"}, LoginItemsListed: true})
-	res, err := New(uid).Finish(f.env(m), nil)
+	m := record(t, Inventory{LoginItems: []string{"Raycast"}, LoginItemsListed: true})
+	items, err := New(uid).Steps(f.env(m))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if !slices.Equal(res.Done, []string{"loaded com.a"}) {
-		t.Errorf("done = %q", res.Done)
+	want := []checklist.Item{{ID: "loginitems:Raycast", Module: Name, Title: "Add Raycast to Login Items again",
+		Where: "System Settings > General > Login Items & Extensions", Link: "x-apple.systempreferences:com.apple.LoginItems-Settings.extension"}}
+	if !slices.Equal(items, want) {
+		t.Errorf("steps = %+v, want %+v", items, want)
 	}
-	if len(res.Checklist) != 1 || res.Checklist[0].ID != "loginitems:Raycast" || res.Checklist[0].Link != "" {
-		t.Errorf("checklist = %+v, want the Raycast step with no link", res.Checklist)
+}
+
+func TestStepsWithoutTheMacOSVersionHaveNoLink(t *testing.T) {
+	f := newFixture(t)
+	f.fake.Responses["/usr/bin/sw_vers -productVersion"] = runner.Response{Code: 1}
+	m := record(t, Inventory{LoginItems: []string{"Raycast"}, LoginItemsListed: true})
+	items, err := New(uid).Steps(f.env(m))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if len(items) != 1 || items[0].ID != "loginitems:Raycast" || items[0].Link != "" {
+		t.Errorf("steps = %+v, want the Raycast step with no link", items)
 	}
 }
 
@@ -150,11 +153,11 @@ func TestFinishBootstrapFailureIsByHand(t *testing.T) {
 	}
 }
 
-func TestFinishWhenLoginItemsWereNotListed(t *testing.T) {
+func TestStepsWhenLoginItemsWereNotListed(t *testing.T) {
 	f := newFixture(t)
-	res, err := New(uid).Finish(f.env(record(t, Inventory{})), nil)
-	if err != nil || len(res.Checklist) != 1 || res.Checklist[0].ID != "loginitems:from-old-mac" {
-		t.Errorf("Finish = %+v, %v; want one step to note the login items on the old Mac", res, err)
+	items, err := New(uid).Steps(f.env(record(t, Inventory{})))
+	if err != nil || len(items) != 1 || items[0].ID != "loginitems:from-old-mac" {
+		t.Errorf("Steps = %+v, %v; want one step to note the login items on the old Mac", items, err)
 	}
 }
 

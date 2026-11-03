@@ -173,7 +173,8 @@ type Module interface {
 - `Env` carries the runner, home directory, catalog, and the current mode (old Mac or new Mac). Logging wraps the runner. `Env.Manifest` is the record: on the new Mac it is what `verify` and `finish` check against; during `prepare` it holds this Mac's previous record, if any, so a re-run can carry forward what the first run changed (for example, services it stopped).
 - Modules whose `prepare` changes the old Mac also implement `Undo(env, st) (Result, error)`, which `prepare --undo` calls. After a successful undo, that module's record is removed, so `verify` reports it not prepared until `prepare` runs again.
 - `Finding` has: module, id, severity (`info`, `warn`, `blocker`), handler (`migration-assistant`, `mtm`, `manual`), title, detail, fix.
-- `Result` has: what was done, artifacts written (each with its fingerprint), checklist items to add, and problems. `finish` merges every module's items into `state.json`. An item already there keeps its status and gets the new text, so `finish` can run again.
+- `Result` has: what was done, artifacts written (each with its fingerprint), and problems.
+- Modules that leave steps for the user on the new Mac also implement `Steps(env) ([]checklist.Item, error)` (`Stepper`), which works from the record alone. `finish` and `verify` both merge every recorded module's steps into `state.json`, so `verify` lists them even when `finish` didn't run, or ran with `--only`. A step already there keeps its status and gets the new text, so either command can run again. A `finish` that adds a step clears the last verify result, so `cleanup` waits for a new SAFE TO WIPE.
 - A `Check` can name the checklist items it proves done (`Resolves`). When it passes, `verify` marks them done, as the `permissions` module does for each grant it finds.
 - `Check` has: module, id, status (`pass`, `fail`, `warn`, `info`), critical flag, title, detail.
 - Modules never print. All output goes through `report`.

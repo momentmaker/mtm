@@ -153,20 +153,29 @@ func TestParseGrantsReadsNoOutputAsNoRows(t *testing.T) {
 	}
 }
 
-func finishSteps(t *testing.T, f fixture, m *manifest.Manifest) []checklist.Item {
+func steps(t *testing.T, f fixture, m *manifest.Manifest) []checklist.Item {
 	t.Helper()
-	res, err := f.mod.Finish(f.env(m), nil)
+	items, err := f.mod.Steps(f.env(m))
 	if err != nil {
 		t.Fatal(err)
 	}
-	return res.Checklist
+	return items
 }
 
-func TestFinishListsAStepPerGrantSystemSettingsShows(t *testing.T) {
+// grantedRecord is the record of a prepare that read this fixture's
+// grants, from a Mac with iTerm.
+func grantedRecord(t *testing.T, f fixture) *manifest.Manifest {
+	t.Helper()
+	res, err := f.mod.Prepare(f.env(nil), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	return record(t, res.Inventory.(Inventory), recordedApp{Path: "/Applications/iTerm.app", BundleID: "com.googlecode.iterm2"})
+}
+
+func TestStepsAreOnePerGrantSystemSettingsShows(t *testing.T) {
 	f := newFixture(t)
-	res, _ := f.mod.Prepare(f.env(nil), nil)
-	m := record(t, res.Inventory.(Inventory), recordedApp{Path: "/Applications/iTerm.app", BundleID: "com.googlecode.iterm2"})
-	items := finishSteps(t, f, m)
+	items := steps(t, f, grantedRecord(t, f))
 	want := []checklist.Item{
 		{ID: "permissions:com.googlecode.iterm2:Automation:com.apple.systemevents", Module: Name, Title: "Let iTerm control com.apple.systemevents (Automation)",
 			Where: "System Settings > Privacy & Security > Automation", Link: link26 + "Privacy_Automation"},
@@ -180,13 +189,21 @@ func TestFinishListsAStepPerGrantSystemSettingsShows(t *testing.T) {
 	}
 }
 
-func TestFinishFromTheCatalogCoversTheRecordedApps(t *testing.T) {
+func TestFinishCountsTheStepsToGrantAgain(t *testing.T) {
+	f := newFixture(t)
+	res, err := f.mod.Finish(f.env(grantedRecord(t, f)), nil)
+	if err != nil || !slices.Equal(res.Done, []string{"listed 3 privacy permissions to grant again"}) {
+		t.Errorf("Finish = %+v, %v", res, err)
+	}
+}
+
+func TestStepsFromTheCatalogCoverTheRecordedApps(t *testing.T) {
 	f := newFixture(t)
 	m := record(t, Inventory{Source: "catalog"},
 		recordedApp{Path: "/Applications/zoom.us.app", BundleID: "us.zoom.xos"},
 		recordedApp{Path: "/Applications/Notes.app", BundleID: "com.example.notes"})
 	var titles []string
-	for _, it := range finishSteps(t, f, m) {
+	for _, it := range steps(t, f, m) {
 		titles = append(titles, it.Title)
 	}
 	if want := []string{"Give Zoom Camera access", "Give Zoom Microphone access"}; !slices.Equal(titles, want) {
@@ -194,11 +211,11 @@ func TestFinishFromTheCatalogCoversTheRecordedApps(t *testing.T) {
 	}
 }
 
-func TestFinishOnAnUncheckedMacOSGivesNoLinks(t *testing.T) {
+func TestStepsOnAnUncheckedMacOSHaveNoLinks(t *testing.T) {
 	f := newFixture(t)
 	f.fake.Responses["/usr/bin/sw_vers -productVersion"] = runner.Response{Stdout: "27.0\n"}
 	m := record(t, Inventory{Source: "tcc", Grants: []Grant{{Service: "kTCCServiceAccessibility", Client: "com.raycast.macos"}}})
-	items := finishSteps(t, f, m)
+	items := steps(t, f, m)
 	if len(items) != 1 || items[0].Link != "" || items[0].Where == "" {
 		t.Errorf("steps = %+v, want a place but no link", items)
 	}
@@ -252,7 +269,7 @@ func TestPrepareTreatsAMissingUserDatabaseAsNoGrants(t *testing.T) {
 	}
 }
 
-func TestFinishFailsOnAnUnreadableSystemRecord(t *testing.T) {
+func TestStepsFailOnAnUnreadableSystemRecord(t *testing.T) {
 	f := newFixture(t)
 	m := manifest.New("test")
 	if err := m.SetModule(Name, time.Now(), Inventory{Source: "catalog"}); err != nil {
@@ -261,16 +278,16 @@ func TestFinishFailsOnAnUnreadableSystemRecord(t *testing.T) {
 	if err := m.SetModule("system", time.Now(), map[string]any{"apps": "nope"}); err != nil {
 		t.Fatal(err)
 	}
-	if _, err := f.mod.Finish(f.env(m), nil); err == nil {
-		t.Error("Finish succeeded on a malformed system record")
+	if _, err := f.mod.Steps(f.env(m)); err == nil {
+		t.Error("Steps succeeded on a malformed system record")
 	}
 }
 
-func TestFinishFromTheCatalogKeepsAbsoluteClientsAsPaths(t *testing.T) {
+func TestStepsFromTheCatalogKeepAbsoluteClientsAsPaths(t *testing.T) {
 	f := newFixture(t)
 	f.mod.Catalog = pathCatalog(t)
 	m := record(t, Inventory{Source: "catalog"}, recordedApp{Path: "/Applications/Tool.app", BundleID: "com.example.tool"})
-	items := finishSteps(t, f, m)
+	items := steps(t, f, m)
 	if len(items) != 1 || items[0].Title != "Give tool Full Disk Access" || items[0].ID != "permissions:/usr/local/bin/tool:Full Disk Access" {
 		t.Errorf("steps = %+v", items)
 	}
