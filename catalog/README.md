@@ -7,6 +7,8 @@ id = "raycast"                 # lowercase words joined by hyphens; must match t
 name = "Raycast"               # as the app names itself
 bundle_id = "com.raycast.macos"
 notes = ["Sign in to your account again if it asks."]   # extra checklist steps
+# kind = "password-manager"    # or "secure-enclave-agent"; only for those kinds of app
+# ssh_agent = ["~/.example/agent.sock"]   # where the app's SSH agent listens, if it has one
 
 [[permissions]]                # privacy permissions the app needs to work
 service = "Accessibility"      # a name from internal/catalog/services.go
@@ -15,6 +17,8 @@ service = "Accessibility"      # a name from internal/catalog/services.go
 [license]
 reactivate = true              # the license must be entered again on a new Mac
 note = "Enter your license again if it asks."
+deactivate = false             # the license must be released on the old Mac before it's erased
+# deactivate_note = "Deactivate it in Settings > License."
 
 [state]
 volatile = ["~/Library/Application Support/Raycast/logs/"]   # paths the app deletes on its own
@@ -23,7 +27,12 @@ volatile = ["~/Library/Application Support/Raycast/logs/"]   # paths the app del
 mtm turns these into checklist steps on the new Mac:
 - one per permission, unless it can read the old Mac's privacy permissions directly;
 - one for a license to reactivate;
-- one per note.
+- one per note;
+- for a password manager, one to sign in to it, and one to turn its SSH agent on again if SSH used it.
+
+On the old Mac, `mtm retire` adds a step for each license to deactivate.
+
+A `secure-enclave-agent` app keeps SSH keys in the Mac's Secure Enclave, which no migration can move, so mtm asks for new keys on the new Mac.
 
 Volatile paths that are missing after Migration Assistant are reported as info, not warnings.
 

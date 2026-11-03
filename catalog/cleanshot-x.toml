@@ -11,3 +11,5 @@ service = "Accessibility"
 [license]
 reactivate = true
 note = "Activate CleanShot X with your license key; it counts Macs, so remove the old one from your account."
+deactivate = true
+deactivate_note = "CleanShot X counts Macs: deactivate it in its settings, or remove this Mac from your CleanShot account."

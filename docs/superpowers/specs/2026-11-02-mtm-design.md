@@ -200,10 +200,11 @@ volatile = ["~/Library/Application Support/com.raycast.macos/*.log"]
 - Fields:
   - identity: `id` (lowercase words joined by hyphens, matching the file name), `name`, and `bundle_id`;
   - required privacy permissions: `[[permissions]]`, each with `service` and an optional `client`, for when macOS records the grant for a helper rather than the app;
-  - license reactivation: `[license]`, with `reactivate` and a `note`. Deactivate steps for `retire` come with `retire`.
+  - licenses: `[license]`, with `reactivate` and a `note` for the new Mac, and `deactivate` and a `deactivate_note` for apps that count Macs, which `retire` turns into a step on the old Mac;
+  - for the `secrets` module, `kind` (`password-manager` or `secure-enclave-agent`) and `ssh_agent`, the `~/` paths of the sockets the app's SSH agent listens on;
   - per-app checklist `notes`;
   - `[state]` `volatile` paths (`~/` patterns of files the app deletes on its own). The `files` module treats a missing one as info.
-- The tests reject a file with an unknown key, an unknown service, a malformed id or bundle id, or a bundle id already in another file.
+- The tests reject a file with an unknown key, an unknown service or kind, a malformed id or bundle id, a bundle id already in another file, an `ssh_agent` or `volatile` path outside `~/`, or a `deactivate_note` without `deactivate`.
 - Privacy panes live in one table in `internal/catalog`, with each pane's name, its privacy-database service id, and its System Settings deep link per macOS major version. They are not repeated in each app file. A macOS major without a checked link gets the pane's name and no link.
 - Initial data is seeded from the `tape` project's definitions (BSD-2-Clause, credited). mackup's GPL-3 database is not copied.
 - Adding an app means adding a file. The contributor guide documents the format, and CI validates every file.

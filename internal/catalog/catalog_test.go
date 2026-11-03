@@ -64,6 +64,8 @@ client = "com.raycast.helper"
 [license]
 reactivate = true
 note = "Enter the key."
+deactivate = true
+deactivate_note = "Deactivate it in Settings."
 
 [state]
 volatile = ["~/Library/Application Support/Raycast/logs/"]
@@ -80,6 +82,25 @@ volatile = ["~/Library/Application Support/Raycast/logs/"]
 	}
 	if len(a.Notes) != 1 || len(a.State.Volatile) != 1 {
 		t.Errorf("notes %q, volatile %q", a.Notes, a.State.Volatile)
+	}
+	if !a.License.Deactivate || a.License.DeactivateNote != "Deactivate it in Settings." {
+		t.Errorf("license = %+v", a.License)
+	}
+}
+
+func TestParseReadsAPasswordManager(t *testing.T) {
+	data := `id = "1password"
+name = "1Password"
+bundle_id = "com.1password.1password"
+kind = "password-manager"
+ssh_agent = ["~/Library/Group Containers/2BUA8C4S2C.com.1password/t/agent.sock"]
+`
+	a, err := Parse("1password.toml", []byte(data))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if a.Kind != KindPasswordManager || len(a.SSHAgent) != 1 {
+		t.Errorf("app = %+v", a)
 	}
 }
 
@@ -98,6 +119,9 @@ func TestParseRejectsMistakes(t *testing.T) {
 		{"volatile outside home", "raycast.toml", raycast + "\n[state]\nvolatile = [\"/tmp/x\"]\n", "must start with ~/"},
 		{"broken pattern", "raycast.toml", raycast + "\n[state]\nvolatile = [\"~/[x\"]\n", "volatile path"},
 		{"not TOML", "raycast.toml", "id = ", "catalog file raycast.toml"},
+		{"unknown kind", "raycast.toml", raycastHead + "kind = \"launcher\"\n", "kind \"launcher\""},
+		{"agent outside home", "raycast.toml", raycastHead + "ssh_agent = [\"/tmp/agent.sock\"]\n", "must start with ~/"},
+		{"note for no deactivation", "raycast.toml", raycast + "\n[license]\ndeactivate_note = \"x\"\n", "needs license.deactivate"},
 	}
 	for _, tt := range tests {
 		_, err := Parse(tt.file, []byte(tt.data))

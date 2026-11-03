@@ -1,6 +1,8 @@
 // Package catalog reads mtm's app definitions: the privacy permissions an
-// app needs, whether its license needs reactivating, notes for the
-// checklist, and paths that come and go on their own.
+// app needs, whether its license needs reactivating on the new Mac or
+// deactivating on the old one, notes for the checklist, paths that come and
+// go on their own, and what the secrets module needs to know about
+// password managers and SSH agents.
 package catalog
 
 import (
@@ -18,10 +20,21 @@ import (
 	"github.com/momentmaker/mtm/internal/pathset"
 )
 
+// Kinds of app the secrets module looks for.
+const (
+	KindPasswordManager    = "password-manager"
+	KindSecureEnclaveAgent = "secure-enclave-agent"
+)
+
+// App is one catalog file. Kind is empty or one of the Kind constants.
+// SSHAgent lists the sockets, as ~/ paths, where the app's SSH agent
+// listens, so the secrets module can tell which agent SSH uses.
 type App struct {
 	ID          string       `toml:"id"`
 	Name        string       `toml:"name"`
 	BundleID    string       `toml:"bundle_id"`
+	Kind        string       `toml:"kind"`
+	SSHAgent    []string     `toml:"ssh_agent"`
 	Permissions []Permission `toml:"permissions"`
 	License     License      `toml:"license"`
 	Notes       []string     `toml:"notes"`
@@ -43,9 +56,15 @@ func (p Permission) ClientFor(a App) string {
 	return a.BundleID
 }
 
+// License says whether the app's license must be entered again on the new
+// Mac (Reactivate, with Note), and whether it must be released on the old
+// Mac before it is erased, because the vendor counts Macs (Deactivate,
+// with DeactivateNote).
 type License struct {
-	Reactivate bool   `toml:"reactivate"`
-	Note       string `toml:"note"`
+	Reactivate     bool   `toml:"reactivate"`
+	Note           string `toml:"note"`
+	Deactivate     bool   `toml:"deactivate"`
+	DeactivateNote string `toml:"deactivate_note"`
 }
 
 // State holds volatile: home-folder paths, as pathset patterns, that the
@@ -117,6 +136,15 @@ func (a App) validate(file string) error {
 		return fmt.Errorf("name is missing")
 	case !bundlePattern.MatchString(a.BundleID):
 		return fmt.Errorf("bundle_id %q is not a reverse-DNS id", a.BundleID)
+	case a.Kind != "" && a.Kind != KindPasswordManager && a.Kind != KindSecureEnclaveAgent:
+		return fmt.Errorf("kind %q is not %q or %q", a.Kind, KindPasswordManager, KindSecureEnclaveAgent)
+	case a.License.DeactivateNote != "" && !a.License.Deactivate:
+		return fmt.Errorf("license.deactivate_note needs license.deactivate = true")
+	}
+	for _, s := range a.SSHAgent {
+		if !strings.HasPrefix(s, "~/") {
+			return fmt.Errorf("ssh_agent socket %q must start with ~/", s)
+		}
 	}
 	for _, p := range a.Permissions {
 		if _, ok := ServiceNamed(p.Service); !ok {

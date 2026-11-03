@@ -1,0 +1,8 @@
+id = "bitwarden"
+name = "Bitwarden"
+bundle_id = "com.bitwarden.desktop"
+kind = "password-manager"
+ssh_agent = [
+  "~/.bitwarden-ssh-agent.sock",
+  "~/Library/Containers/com.bitwarden.desktop/Data/.bitwarden-ssh-agent.sock",
+]
