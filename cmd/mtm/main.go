@@ -37,9 +37,13 @@ const usage = `mtm moves a developer's Mac to a new Mac, alongside Migration Ass
 
 Usage:
   mtm scan [--json]                         check this Mac before migrating (changes nothing)
-  mtm prepare [--only a,b] [--deep]         record this Mac before Migration Assistant
+  mtm prepare [--only a,b] [--deep] [--stage /Volumes/X]
+                                            record this Mac before Migration Assistant;
+                                            --stage puts exports on an encrypted drive
   mtm prepare --undo                        put this Mac back in use if you call off the migration
-  mtm finish                                on the new Mac: restore what prepare set aside
+  mtm finish [--only a,b]                   on the new Mac: restore what prepare set aside
+  mtm finish --only databases --restore-dump [--force]
+                                            load the Postgres safety-net dump
   mtm verify [--only a,b] [--deep] [--details] [--json]
                                             check the new Mac against the record
   mtm cleanup [--force]                     delete ~/.mtm after SAFE TO WIPE
@@ -138,17 +142,18 @@ func cmdPrepare(ctx context.Context, a *app.App, args []string, stdout, stderr i
 	only := flags.String("only", "", "comma-separated modules to prepare")
 	deep := flags.Bool("deep", false, "fingerprint every file (slow)")
 	undo := flags.Bool("undo", false, "put this Mac back in use: restart what prepare stopped")
+	stageDir := flags.String("stage", "", "write exports to this folder on an encrypted APFS drive")
 	if err := flags.Parse(args); err != nil {
 		return exitFailed
 	}
 	if *undo {
-		if *only != "" || *deep {
-			fmt.Fprintln(stderr, "mtm prepare: --undo can't be combined with --only or --deep")
+		if *only != "" || *deep || *stageDir != "" {
+			fmt.Fprintln(stderr, "mtm prepare: --undo can't be combined with --only, --deep, or --stage")
 			return exitFailed
 		}
 		return runUndo(ctx, a, stdout, stderr)
 	}
-	rep, err := a.Prepare(ctx, app.PrepareOptions{Only: splitList(*only), Deep: *deep})
+	rep, err := a.Prepare(ctx, app.PrepareOptions{Only: splitList(*only), Deep: *deep, StageDir: *stageDir})
 	if err != nil {
 		fmt.Fprintln(stderr, "mtm prepare:", err)
 		return exitFailed
@@ -185,10 +190,22 @@ func runUndo(ctx context.Context, a *app.App, stdout, stderr io.Writer) int {
 func cmdFinish(ctx context.Context, a *app.App, args []string, stdout, stderr io.Writer) int {
 	flags := flag.NewFlagSet("finish", flag.ContinueOnError)
 	flags.SetOutput(stderr)
+	only := flags.String("only", "", "comma-separated modules to finish")
+	restoreDump := flags.Bool("restore-dump", false, "load the Postgres dump prepare saved (with --only databases)")
+	force := flags.Bool("force", false, "with --restore-dump: restore even into a cluster that has databases")
 	if err := flags.Parse(args); err != nil {
 		return exitFailed
 	}
-	rep, err := a.Finish(ctx)
+	mods := splitList(*only)
+	if *restoreDump && (len(mods) != 1 || mods[0] != "databases") {
+		fmt.Fprintln(stderr, "mtm finish: --restore-dump works only with --only databases")
+		return exitFailed
+	}
+	if *force && !*restoreDump {
+		fmt.Fprintln(stderr, "mtm finish: --force works only with --restore-dump")
+		return exitFailed
+	}
+	rep, err := a.Finish(ctx, app.FinishOptions{Only: mods, Force: *force, RestoreDump: *restoreDump})
 	switch {
 	case errors.Is(err, app.ErrFinishOnOldMac):
 		fmt.Fprintln(stderr, "mtm finish:", err)
@@ -240,7 +257,7 @@ func cmdCleanup(_ context.Context, a *app.App, args []string, stdout, stderr io.
 	if err := flags.Parse(args); err != nil {
 		return exitFailed
 	}
-	removed, err := a.Cleanup(*force)
+	rep, err := a.Cleanup(*force)
 	switch {
 	case errors.Is(err, app.ErrNotVerified):
 		fmt.Fprintln(stderr, "mtm cleanup:", err)
@@ -248,9 +265,15 @@ func cmdCleanup(_ context.Context, a *app.App, args []string, stdout, stderr io.
 	case err != nil:
 		fmt.Fprintln(stderr, "mtm cleanup:", err)
 		return exitFailed
-	case !removed:
+	case !rep.Removed:
 		fmt.Fprintln(stdout, "Nothing to clean up: ~/.mtm does not exist.")
 		return exitOK
+	}
+	switch {
+	case rep.ExternalRemoved:
+		fmt.Fprintf(stdout, "Deleted %s.\n", rep.External)
+	case rep.External != "":
+		fmt.Fprintf(stdout, "Also delete %s, the exports prepare --stage wrote, when that drive is attached.\n", rep.External)
 	}
 	fmt.Fprintln(stdout, "Deleted ~/.mtm.")
 	fmt.Fprintln(stdout, "If you gave your terminal Full Disk Access for mtm, remove it now:")

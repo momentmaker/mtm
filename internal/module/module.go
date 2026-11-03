@@ -22,13 +22,20 @@ const (
 // Env is what a module gets to work with. Manifest is the record: on the
 // new Mac, the one verify and finish check against; during prepare, this
 // Mac's previous record (empty on the first run); nil during scan.
+// Exports is the folder export archives go in, nil during scan. Free
+// reports a volume's free space. Force and RestoreDump carry finish's
+// flags of those names.
 type Env struct {
-	Ctx      context.Context
-	Run      runner.Runner
-	Home     string
-	Machine  Machine
-	Deep     bool
-	Manifest *manifest.Manifest
+	Ctx         context.Context
+	Run         runner.Runner
+	Home        string
+	Machine     Machine
+	Deep        bool
+	Manifest    *manifest.Manifest
+	Exports     *stage.Stage
+	Free        func(path string) (uint64, error)
+	Force       bool
+	RestoreDump bool
 }
 
 type Severity string

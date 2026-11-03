@@ -9,6 +9,7 @@ import (
 	"io/fs"
 	"maps"
 	"os"
+	"path/filepath"
 	"slices"
 	"strings"
 	"time"
@@ -29,21 +30,27 @@ var (
 	ErrNotVerified     = errors.New("mtm verify has not reported SAFE TO WIPE on this Mac; run mtm verify first, or pass --force to delete ~/.mtm anyway")
 )
 
+// App runs mtm's commands. Free reports a volume's free space; nil means
+// stage.Free.
 type App struct {
 	Runner  runner.Runner
 	Home    string
 	Version string
 	Now     func() time.Time
 	Modules []module.Module
+	Free    func(path string) (uint64, error)
 }
 
 type ScanReport struct {
 	Findings []module.Finding `json:"findings"`
 }
 
+// PrepareOptions are prepare's flags. StageDir is the --stage folder on an
+// external volume; empty keeps exports in ~/.mtm/exports.
 type PrepareOptions struct {
-	Only []string
-	Deep bool
+	Only     []string
+	Deep     bool
+	StageDir string
 }
 
 type PrepareReport struct {
@@ -60,6 +67,21 @@ type VerifyOptions struct {
 type VerifyReport struct {
 	Checks  []module.Check  `json:"checks"`
 	Verdict verdict.Verdict `json:"verdict"`
+}
+
+type FinishOptions struct {
+	Only        []string
+	Force       bool
+	RestoreDump bool
+}
+
+// CleanupReport says what cleanup deleted. External is the prepare --stage
+// folder, if prepare used one; ExternalRemoved is false when its drive
+// isn't attached.
+type CleanupReport struct {
+	Removed         bool
+	External        string
+	ExternalRemoved bool
 }
 
 // StepReport is what finish or prepare --undo did, and what is left to do
@@ -80,7 +102,7 @@ func (r *StepReport) add(name string, res module.Result) {
 // handle. It changes nothing on disk.
 func (a *App) Scan(ctx context.Context) ScanReport {
 	findings := preflight.Check(ctx, a.Runner)
-	env := a.env(ctx, module.OldMac, false, nil, a.Runner)
+	env := a.env(ctx, module.OldMac, false, nil, a.Runner, nil)
 	for _, m := range a.Modules {
 		found, err := m.Scan(env)
 		if err != nil {
@@ -132,12 +154,21 @@ func (a *App) Prepare(ctx context.Context, opts PrepareOptions) (PrepareReport, 
 	case m.MachineID != info.MachineID:
 		return rep, fmt.Errorf("%w (recorded %s). If this is the new Mac, run mtm verify instead", ErrOtherMacsRecord, m.PreparedAt.Local().Format(time.RFC1123))
 	}
+	exports, problem := a.prepareExports(ctx, run, st, m, opts)
+	if problem != nil {
+		rep.Problems = append(rep.Problems, *problem)
+		return rep, nil
+	}
 	m.MtmVersion = a.Version
 	m.MacOSVersion, m.MacOSBuild, m.MachineID = info.MacOSVersion, info.MacOSBuild, info.MachineID
 	m.Hostname, _ = os.Hostname()
+	m.ExportsDir = ""
+	if opts.StageDir != "" {
+		m.ExportsDir = exports.Root
+	}
 
 	startedAt := a.Now()
-	env := a.env(ctx, module.OldMac, opts.Deep, m, run)
+	env := a.env(ctx, module.OldMac, opts.Deep, m, run, exports)
 	for _, mod := range mods {
 		res, err := mod.Prepare(env, st)
 		if err != nil {
@@ -204,7 +235,7 @@ func (a *App) Verify(ctx context.Context, opts VerifyOptions) (VerifyReport, err
 		})
 	}
 
-	env := a.env(ctx, module.NewMac, opts.Deep, m, run)
+	env := a.env(ctx, module.NewMac, opts.Deep, m, run, exportsFor(st, m))
 	for _, mod := range mods {
 		if _, ok := m.Modules[mod.Name()]; !ok {
 			checks = append(checks, module.Check{
@@ -242,7 +273,11 @@ func (a *App) Verify(ctx context.Context, opts VerifyOptions) (VerifyReport, err
 
 // Finish restores, on the new Mac, what prepare set aside on the old one.
 // It refuses on the old Mac, where it would restart what prepare stopped.
-func (a *App) Finish(ctx context.Context) (StepReport, error) {
+func (a *App) Finish(ctx context.Context, opts FinishOptions) (StepReport, error) {
+	mods, err := a.selectModules(opts.Only)
+	if err != nil {
+		return StepReport{}, err
+	}
 	if problems := preflight.Check(ctx, a.Runner); module.HasBlocker(problems) {
 		return StepReport{Problems: problems}, nil
 	}
@@ -266,9 +301,10 @@ func (a *App) Finish(ctx context.Context) (StepReport, error) {
 	if info.MachineID == m.MachineID {
 		return StepReport{}, ErrFinishOnOldMac
 	}
-	env := a.env(ctx, module.NewMac, false, m, run)
+	env := a.env(ctx, module.NewMac, false, m, run, exportsFor(st, m))
+	env.Force, env.RestoreDump = opts.Force, opts.RestoreDump
 	var rep StepReport
-	for _, mod := range a.Modules {
+	for _, mod := range mods {
 		if _, ok := m.Modules[mod.Name()]; !ok {
 			continue
 		}
@@ -306,7 +342,7 @@ func (a *App) Undo(ctx context.Context) (StepReport, error) {
 	if info.MachineID != m.MachineID {
 		return StepReport{}, ErrUndoOnNewMac
 	}
-	env := a.env(ctx, module.OldMac, false, m, run)
+	env := a.env(ctx, module.OldMac, false, m, run, exportsFor(st, m))
 	var rep StepReport
 	for _, mod := range a.Modules {
 		u, ok := mod.(module.Undoer)
@@ -339,29 +375,129 @@ func loadRecord(st *stage.Stage) (*manifest.Manifest, error) {
 	return m, err
 }
 
-// Cleanup deletes ~/.mtm. Without force, it requires a SAFE TO WIPE result
-// from a full verify on this Mac.
-func (a *App) Cleanup(force bool) (bool, error) {
+// Cleanup deletes ~/.mtm, and the prepare --stage folder when its drive is
+// attached. Without force, it requires a SAFE TO WIPE result from a full
+// verify on this Mac.
+func (a *App) Cleanup(force bool) (CleanupReport, error) {
 	st, err := stage.Existing(a.Home)
 	if errors.Is(err, stage.ErrNotFound) {
-		return false, nil
+		return CleanupReport{}, nil
 	}
 	if err != nil {
-		return false, err
+		return CleanupReport{}, err
 	}
 	if !force {
 		s, err := state.Load(st)
 		if err != nil {
-			return false, err
+			return CleanupReport{}, err
 		}
 		if s.LastVerify == nil || !s.LastVerify.Safe {
-			return false, ErrNotVerified
+			return CleanupReport{}, ErrNotVerified
+		}
+	}
+	var rep CleanupReport
+	// A damaged record can't name a --stage folder; with --force, ~/.mtm
+	// still goes.
+	if m, err := manifest.Load(st); err == nil && m.ExportsDir != "" {
+		rep.External = m.ExportsDir
+		if rep.ExternalRemoved, err = removeExternal(m.ExportsDir); err != nil {
+			return rep, err
 		}
 	}
 	if err := st.Remove(); err != nil {
+		return rep, err
+	}
+	rep.Removed = true
+	return rep, nil
+}
+
+// removeExternal deletes the prepare --stage folder if its drive is
+// attached. It deletes only a private folder named mtm-exports, so a
+// damaged record can't point cleanup at other data.
+func removeExternal(root string) (bool, error) {
+	if filepath.Base(root) != stage.ExternalDirName {
+		return false, fmt.Errorf("the record names %s as the exports folder, which mtm didn't make; delete it yourself if it holds only exports", root)
+	}
+	if _, err := os.Lstat(root); errors.Is(err, fs.ErrNotExist) {
+		return false, nil
+	}
+	exports, err := stage.ExistingDir(root)
+	if err != nil {
+		return false, err
+	}
+	if err := exports.Remove(); err != nil {
 		return false, err
 	}
 	return true, nil
+}
+
+// prepareExports opens the folder this run's exports go in. A problem ends
+// prepare before any module runs: an unsafe --stage volume, or a partial
+// run that would scatter one record's exports across two folders.
+func (a *App) prepareExports(ctx context.Context, run runner.Runner, st *stage.Stage, m *manifest.Manifest, opts PrepareOptions) (*stage.Stage, *module.Finding) {
+	want := ""
+	if opts.StageDir != "" {
+		want = filepath.Join(opts.StageDir, stage.ExternalDirName)
+	}
+	if len(opts.Only) > 0 && len(m.Modules) > 0 && m.ExportsDir != want {
+		return nil, &module.Finding{
+			Module: "stage", ID: "exports", Severity: module.SeverityBlocker, Handler: module.Manual,
+			Title:  "prepare --only must keep exports where the earlier prepare put them",
+			Detail: fmt.Sprintf("the earlier prepare used %s; this one would use %s", exportsName(m.ExportsDir), exportsName(want)),
+			Fix:    "Pass the same --stage as before, or run mtm prepare without --only.",
+		}
+	}
+	exports, err := a.openExports(ctx, run, st, opts.StageDir)
+	if err != nil {
+		return nil, &module.Finding{
+			Module: "stage", ID: "exports", Severity: module.SeverityBlocker, Handler: module.Manual,
+			Title:  "Could not use the folder for exports",
+			Detail: err.Error(),
+			Fix:    "Fix the cause above and run mtm prepare again.",
+		}
+	}
+	return exports, nil
+}
+
+func (a *App) openExports(ctx context.Context, run runner.Runner, st *stage.Stage, stageDir string) (*stage.Stage, error) {
+	if stageDir == "" {
+		return stage.OpenDir(st.Path(stage.ExportsDirName))
+	}
+	if !filepath.IsAbs(stageDir) {
+		return nil, fmt.Errorf("--stage needs a full path, such as /Volumes/Backup, not %s", stageDir)
+	}
+	vol, err := stage.VolumeOf(stageDir)
+	if err != nil {
+		return nil, err
+	}
+	if err := stage.CheckExternal(ctx, run, vol); err != nil {
+		return nil, err
+	}
+	exports, err := stage.OpenDir(filepath.Join(stageDir, stage.ExternalDirName))
+	if err != nil {
+		return nil, err
+	}
+	if err := exports.ExcludeFromBackups(ctx, run); err != nil {
+		return nil, err
+	}
+	return exports, nil
+}
+
+func exportsName(dir string) string {
+	if dir == "" {
+		return "~/.mtm/exports"
+	}
+	return dir
+}
+
+// exportsFor is the folder prepare wrote exports to. Nothing is checked
+// here: a module checks the folder when it reads an export, so a detached
+// --stage drive fails only the restores that need it.
+func exportsFor(st *stage.Stage, m *manifest.Manifest) *stage.Stage {
+	if m.ExportsDir != "" {
+		return &stage.Stage{Root: m.ExportsDir}
+	}
+	return &stage.Stage{Root: st.Path(stage.ExportsDirName)}
 }
 
 // unknownModules fails each module in the record that this mtm can't
@@ -381,8 +517,12 @@ func (a *App) unknownModules(m *manifest.Manifest) []module.Check {
 	return checks
 }
 
-func (a *App) env(ctx context.Context, machine module.Machine, deep bool, m *manifest.Manifest, run runner.Runner) module.Env {
-	return module.Env{Ctx: ctx, Run: run, Home: a.Home, Machine: machine, Deep: deep, Manifest: m}
+func (a *App) env(ctx context.Context, machine module.Machine, deep bool, m *manifest.Manifest, run runner.Runner, exports *stage.Stage) module.Env {
+	free := a.Free
+	if free == nil {
+		free = stage.Free
+	}
+	return module.Env{Ctx: ctx, Run: run, Home: a.Home, Machine: machine, Deep: deep, Manifest: m, Exports: exports, Free: free}
 }
 
 func (a *App) selectModules(only []string) ([]module.Module, error) {

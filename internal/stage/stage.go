@@ -15,7 +15,14 @@ import (
 	"github.com/momentmaker/mtm/internal/runner"
 )
 
-const DirName = ".mtm"
+const (
+	DirName = ".mtm"
+	// ExportsDirName is the exports folder inside ~/.mtm.
+	ExportsDirName = "exports"
+	// ExternalDirName is the exports folder prepare --stage makes on an
+	// external volume. cleanup deletes only a folder of this name.
+	ExternalDirName = "mtm-exports"
+)
 
 var ErrNotFound = errors.New("no ~/.mtm folder")
 
@@ -48,6 +55,12 @@ func Existing(home string) (*Stage, error) {
 	if _, err := os.Lstat(root); errors.Is(err, fs.ErrNotExist) {
 		return nil, fmt.Errorf("%s: %w; run mtm prepare on the old Mac first", root, ErrNotFound)
 	}
+	return ExistingDir(root)
+}
+
+// ExistingDir returns the folder root if it exists and is private to this
+// user.
+func ExistingDir(root string) (*Stage, error) {
 	if err := checkSafe(root); err != nil {
 		return nil, err
 	}

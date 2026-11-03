@@ -12,6 +12,7 @@ import (
 	"time"
 
 	"github.com/momentmaker/mtm/internal/app"
+	"github.com/momentmaker/mtm/internal/manifest"
 	"github.com/momentmaker/mtm/internal/module"
 	"github.com/momentmaker/mtm/internal/modules/files"
 	"github.com/momentmaker/mtm/internal/modules/git"
@@ -248,5 +249,45 @@ func TestDefaultAppModules(t *testing.T) {
 	}
 	if want := []string{"files", "git", "system", "homebrew", "toolchains", "loginitems"}; !slices.Equal(names, want) {
 		t.Errorf("modules = %q, want %q", names, want)
+	}
+}
+
+func TestFinishFlagRules(t *testing.T) {
+	tests := []struct {
+		args []string
+		want string
+	}{
+		{[]string{"finish", "--restore-dump"}, "--restore-dump works only with --only databases"},
+		{[]string{"finish", "--only", "docker", "--restore-dump"}, "--restore-dump works only with --only databases"},
+		{[]string{"finish", "--only", "databases,docker", "--restore-dump"}, "--restore-dump works only with --only databases"},
+		{[]string{"finish", "--force"}, "--force works only with --restore-dump"},
+		{[]string{"prepare", "--undo", "--stage", "/Volumes/X"}, "can't be combined"},
+	}
+	for _, tt := range tests {
+		t.Setenv("HOME", t.TempDir())
+		var out, errOut bytes.Buffer
+		code := run(ctx, tt.args, &out, &errOut, fileVaultOnApp)
+		if code != exitFailed || !strings.Contains(errOut.String(), tt.want) {
+			t.Errorf("%q: code %d stderr %q, want %d and %q", tt.args, code, errOut.String(), exitFailed, tt.want)
+		}
+	}
+}
+
+func TestCleanupNamesADetachedStageFolder(t *testing.T) {
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	st, err := stage.Open(home)
+	if err != nil {
+		t.Fatal(err)
+	}
+	m := manifest.New("test")
+	m.MachineID, m.ExportsDir = "x", "/Volumes/Gone/"+stage.ExternalDirName
+	if err := manifest.Save(st, m); err != nil {
+		t.Fatal(err)
+	}
+	var out, errOut bytes.Buffer
+	code := run(ctx, []string{"cleanup", "--force"}, &out, &errOut, fileVaultOnApp)
+	if code != exitOK || !strings.Contains(out.String(), "Also delete /Volumes/Gone/mtm-exports") {
+		t.Errorf("code %d out %q", code, out.String())
 	}
 }

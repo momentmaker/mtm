@@ -282,24 +282,24 @@ func TestCleanupRules(t *testing.T) {
 	if rep := verifyOn(t, newHome, newUUID, VerifyOptions{}); !rep.Verdict.Safe {
 		t.Fatalf("full verify not safe: %v", blockingIDs(rep))
 	}
-	removed, err := a.Cleanup(false)
-	if err != nil || !removed {
-		t.Fatalf("cleanup after SAFE: %v, %v", removed, err)
+	rep, err := a.Cleanup(false)
+	if err != nil || !rep.Removed {
+		t.Fatalf("cleanup after SAFE: %+v, %v", rep, err)
 	}
 	if _, err := os.Stat(filepath.Join(newHome, stage.DirName)); !errors.Is(err, fs.ErrNotExist) {
 		t.Error("~/.mtm still exists")
 	}
-	if removed, err := a.Cleanup(false); err != nil || removed {
-		t.Errorf("second cleanup = %v, %v; want nothing to remove", removed, err)
+	if rep, err := a.Cleanup(false); err != nil || rep.Removed {
+		t.Errorf("second cleanup = %+v, %v; want nothing to remove", rep, err)
 	}
 }
 
 func TestCleanupForce(t *testing.T) {
 	home := seedHome(t)
 	prepareOld(t, home)
-	removed, err := newTestApp(home, fakeMac(home, oldUUID)).Cleanup(true)
-	if err != nil || !removed {
-		t.Errorf("forced cleanup = %v, %v", removed, err)
+	rep, err := newTestApp(home, fakeMac(home, oldUUID)).Cleanup(true)
+	if err != nil || !rep.Removed {
+		t.Errorf("forced cleanup = %+v, %v", rep, err)
 	}
 }
 
@@ -505,7 +505,7 @@ func TestFinishRunsRecordedModulesOnTheNewMac(t *testing.T) {
 	mustPrepare(t, stepApp(old, oldUUID, step))
 	newHome := migrate(t, old)
 	unrecorded := stepModule{name: "extra", calls: &calls}
-	rep, err := stepApp(newHome, newUUID, step, unrecorded).Finish(ctx)
+	rep, err := stepApp(newHome, newUUID, step, unrecorded).Finish(ctx, FinishOptions{})
 	if err != nil {
 		t.Fatal(err)
 	}
@@ -522,7 +522,7 @@ func TestFinishRefusesOnTheOldMac(t *testing.T) {
 	var calls []string
 	a := stepApp(home, oldUUID, stepModule{name: "svc", calls: &calls})
 	mustPrepare(t, a)
-	if _, err := a.Finish(ctx); !errors.Is(err, ErrFinishOnOldMac) {
+	if _, err := a.Finish(ctx, FinishOptions{}); !errors.Is(err, ErrFinishOnOldMac) {
 		t.Errorf("err = %v, want ErrFinishOnOldMac", err)
 	}
 	if slices.Contains(calls, "finish") {
@@ -538,7 +538,7 @@ func TestFinishNeedsFileVault(t *testing.T) {
 	newHome := migrate(t, old)
 	a := stepApp(newHome, newUUID, step)
 	a.Runner.(*runner.Fake).Responses["/usr/bin/fdesetup status"] = runner.Response{Stdout: "FileVault is Off.\n"}
-	rep, err := a.Finish(ctx)
+	rep, err := a.Finish(ctx, FinishOptions{})
 	if err != nil || !module.HasBlocker(rep.Problems) {
 		t.Errorf("Finish = %+v, %v; want a FileVault blocker", rep, err)
 	}

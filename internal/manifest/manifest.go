@@ -25,14 +25,17 @@ var (
 )
 
 type Manifest struct {
-	Schema       int                     `json:"schema"`
-	MtmVersion   string                  `json:"mtm_version"`
-	MacOSVersion string                  `json:"macos_version"`
-	MacOSBuild   string                  `json:"macos_build"`
-	Hostname     string                  `json:"hostname"`
-	MachineID    string                  `json:"machine_id"`
-	PreparedAt   time.Time               `json:"prepared_at"`
-	Modules      map[string]ModuleRecord `json:"modules"`
+	Schema       int       `json:"schema"`
+	MtmVersion   string    `json:"mtm_version"`
+	MacOSVersion string    `json:"macos_version"`
+	MacOSBuild   string    `json:"macos_build"`
+	Hostname     string    `json:"hostname"`
+	MachineID    string    `json:"machine_id"`
+	PreparedAt   time.Time `json:"prepared_at"`
+	// ExportsDir is the folder prepare --stage wrote exports to. Empty
+	// means ~/.mtm/exports.
+	ExportsDir string                  `json:"exports_dir,omitempty"`
+	Modules    map[string]ModuleRecord `json:"modules"`
 }
 
 type ModuleRecord struct {
