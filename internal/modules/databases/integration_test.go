@@ -28,9 +28,22 @@ func requirePostgres(t *testing.T) (string, string) {
 	return bin, strings.TrimPrefix(filepath.Base(filepath.Dir(bin)), "postgresql@")
 }
 
+// pgCommand keeps the developer's PG settings from steering a command to
+// another server, as the module does for its own.
+func pgCommand(name string, args ...string) *exec.Cmd {
+	cmd := exec.Command(name, args...)
+	for _, kv := range os.Environ() {
+		if !slices.Contains(pgUnset, strings.SplitN(kv, "=", 2)[0]) {
+			cmd.Env = append(cmd.Env, kv)
+		}
+	}
+	cmd.Env = append(cmd.Env, pgEnv...)
+	return cmd
+}
+
 func mustRun(t *testing.T, name string, args ...string) string {
 	t.Helper()
-	out, err := exec.Command(name, args...).CombinedOutput()
+	out, err := pgCommand(name, args...).CombinedOutput()
 	if err != nil {
 		t.Fatalf("%s %s: %v\n%s", name, strings.Join(args, " "), err, out)
 	}
@@ -52,7 +65,7 @@ func TestPostgresDumpAndRestore(t *testing.T) {
 	mustRun(t, filepath.Join(bin, "initdb"), "--pgdata", data, "--auth", "trust", "--encoding", "UTF8", "--locale", "C")
 	mustRun(t, filepath.Join(bin, "pg_ctl"), "--pgdata", data, "--log", filepath.Join(varDir, "server.log"),
 		"--options", "-k "+sock+" -p 5432 -c listen_addresses=''", "--wait", "start")
-	t.Cleanup(func() { exec.Command(filepath.Join(bin, "pg_ctl"), "--pgdata", data, "--mode", "fast", "stop").Run() })
+	t.Cleanup(func() { pgCommand(filepath.Join(bin, "pg_ctl"), "--pgdata", data, "--mode", "fast", "stop").Run() })
 	psql := func(db, query string) string {
 		return mustRun(t, filepath.Join(bin, "psql"), "--host", sock, "--port", "5432", "-X", "-w", "--dbname", db, "--tuples-only", "--no-align", "--command", query)
 	}

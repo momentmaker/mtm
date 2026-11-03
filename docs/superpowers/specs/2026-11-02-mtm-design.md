@@ -365,7 +365,7 @@ Otherwise **NOT SAFE TO WIPE**, followed by the blocking items. Exit codes: `0` 
   - Pulled images missing by id and by tag are one warn, listing the `docker pull` commands.
 
 ### 9.6 `databases` (Homebrew Postgres)
-- **Finding clusters.** A cluster is a folder in `/opt/homebrew/var` whose name starts with `postgres` and that holds a `PG_VERSION` file, such as `postgresql@16`. Its programs are in `/opt/homebrew/opt/postgresql@<major>/bin`. A running server writes its port and socket folder to `postmaster.pid` (lines 4 and 5). It counts as running when `pg_isready` reaches it there.
+- **Finding clusters.** A cluster is a folder in `/opt/homebrew/var` whose name starts with `postgres` and that holds a `PG_VERSION` file, such as `postgresql@16`. Its programs are in `/opt/homebrew/opt/postgresql@<major>/bin`. A running server writes its port and socket folder to `postmaster.pid` (lines 4 and 5). A socket folder that isn't an absolute path counts as none. It counts as running when `pg_isready` reaches it there.
 - **Connecting.** Every Postgres command connects through that Unix socket (`--host <socket folder> --port <port>`), never over TCP. It passes `-w`, so it never prompts for a password. It unsets `PGHOST`, `PGHOSTADDR`, `PGPORT`, `PGDATABASE`, `PGUSER`, `PGSERVICE`, `PGSERVICEFILE`, and `PGPASSWORD`, and sets `PGPASSFILE=/dev/null`. `psql` also gets `--no-psqlrc`, so a user's `.psqlrc` can't change its output.
 - **Who stops the service.** The `homebrew` module does. It stops the user's running services in `prepare` and starts them in `finish`, Postgres included. `databases` comes before `homebrew` in the module order, so the server is still running when it dumps.
 - **`scan`:** each running cluster is mtm-handled (a safety-net dump), and each stopped one is copied by Migration Assistant. A running cluster without a Unix socket is a warn: `mtm` can't reach it without a network connection.
@@ -373,12 +373,14 @@ Otherwise **NOT SAFE TO WIPE**, followed by the blocking items. Exit codes: `0` 
   - records the database names (`SELECT datname FROM pg_database WHERE NOT datistemplate`);
   - checks free space against the sum of `pg_database_size`;
   - writes `pg_dumpall` output, gzip-compressed, to `postgres/<cluster>.sql.gz` as a safety net. A failed dump is a warn: Migration Assistant still copies the data folder.
-  - On a re-run, a cluster that has stopped since the earlier run keeps that run's record and dump, because its data hasn't changed since. That is how the `homebrew` module leaves it.
+  - On a re-run, a cluster that has stopped since the earlier run keeps that run's record, and its dump only while the dump still matches its fingerprint, because its data hasn't changed since. That is how the `homebrew` module leaves it. Without a matching dump it is a warn, with the fix `brew services start`, then `mtm prepare --only databases`.
 - **`finish`:** nothing, unless `--restore-dump` is given (`mtm finish --only databases --restore-dump`). For each cluster with a dump, it then:
   - refuses unless the server is running. The fix is `brew postinstall postgresql@<major>` for a missing data folder, then `brew services start`.
-  - refuses on a cluster that has databases other than `postgres`, unless `--force` is also given;
-  - checks the dump's fingerprint, then streams it into `psql --dbname postgres --file=-`.
-- **`verify`** (a critical check per cluster): a cluster that ran at `prepare` must be running and list every recorded database. Its fix is `brew services start`, then `--restore-dump` if it won't start. A cluster that was stopped must have its data folder (`PG_VERSION`).
+  - reaches the server through the socket and port in the new Mac's `postmaster.pid`, not the ones recorded on the old Mac;
+  - refuses on a cluster that has databases other than `postgres`, or whose `postgres` database holds tables, unless `--force` is also given;
+  - checks the dump's fingerprint, then streams it into `psql --dbname postgres --file=-`;
+  - warns with a count when psql reports errors other than the existing role. The warning never quotes psql's output.
+- **`verify`** (a critical check per cluster): a cluster that ran at `prepare` must be running, found through the new Mac's `postmaster.pid`, and list every recorded database. Its fix is `brew services start`, then `--restore-dump` if it won't start. A cluster that was stopped must have its data folder (`PG_VERSION`).
 - Postgres running inside Docker is covered by the `docker` module.
 
 ### 9.7 `loginitems`

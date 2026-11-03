@@ -70,6 +70,7 @@ func (f *fixture) serve(databases ...string) {
 	f.fake.Responses[f.tool("16", "pg_isready")+" --quiet"] = runner.Response{}
 	f.fake.Responses[f.tool("16", "psql")+" -w -X --dbname postgres --tuples-only --no-align --command "+listQuery] = runner.Response{Stdout: strings.Join(databases, "\n") + "\n"}
 	f.fake.Responses[f.tool("16", "psql")+" -w -X --dbname postgres --tuples-only --no-align --command "+sizeQuery] = runner.Response{Stdout: "8123456\n"}
+	f.fake.Responses[f.tool("16", "psql")+" -w -X --dbname postgres --tuples-only --no-align --command "+relationQuery] = runner.Response{Stdout: "0\n"}
 	f.fake.Responses[f.tool("16", "pg_dumpall")+" -w"] = runner.Response{Stdout: dumpSQL}
 	f.fake.Responses[f.tool("16", "psql")+" -w -X --quiet --dbname postgres --file=-"] = runner.Response{}
 }
@@ -349,5 +350,70 @@ func TestVerifyStoppedClusterNeedsItsDataFolder(t *testing.T) {
 	os.RemoveAll(filepath.Join(f.mod.Var, "postgresql@14"))
 	if c := f.verify(m); c.Status != module.StatusFail || !c.Critical {
 		t.Errorf("check = %+v, want a critical fail", c)
+	}
+}
+
+func TestPrepareAgainKeepsTheRecordOfAClusterWhoseDumpFailedBeforeItStopped(t *testing.T) {
+	f := newFixture(t)
+	f.cluster("postgresql@16", "16", true)
+	f.serve("app", "postgres")
+	f.fake.Responses[f.tool("16", "pg_dumpall")+" -w"] = runner.Response{Code: 1, Stderr: "pg_dumpall: error: connection failed"}
+	_, first := f.prepare(record(t, Inventory{}))
+	os.Remove(filepath.Join(f.mod.Var, "postgresql@16", "postmaster.pid"))
+	res, second := f.prepare(record(t, first))
+	c := second.Clusters[0]
+	if !c.Running || c.Dump != nil || !slices.Equal(c.Databases, []string{"app", "postgres"}) {
+		t.Errorf("cluster = %+v, want Running and Databases kept, no dump", c)
+	}
+	if !slices.Equal(ids(res.Problems), []string{"dump:postgresql@16"}) || res.Problems[0].Severity != module.SeverityWarn ||
+		!strings.Contains(res.Problems[0].Fix, "brew services start 'postgresql@16' && mtm prepare --only databases") {
+		t.Errorf("problems = %+v", res.Problems)
+	}
+}
+
+func TestFinishRestoreDumpWarnsAboutPsqlErrorsOtherThanTheExistingRole(t *testing.T) {
+	f, m := dumped(t, "postgres")
+	f.fake.Responses[f.tool("16", "psql")+restoreLine] = runner.Response{Stderr: "psql:-:1: ERROR:  role \"dev\" already exists\npsql:-:5: ERROR:  extension \"x\" is not available\npsql:-:9: ERROR:  relation \"t\" does not exist\n"}
+	res := f.finish(m, true, false)
+	if !slices.Equal(res.Done, []string{"restored postgresql@16 from its dump"}) || !slices.Equal(ids(res.Problems), []string{"restore-errors:postgresql@16"}) {
+		t.Fatalf("finish = %+v", res)
+	}
+	p := res.Problems[0]
+	if p.Severity != module.SeverityWarn || p.Title != "psql reported 2 errors while restoring postgresql@16" || strings.Contains(p.Title+p.Detail+p.Fix, "is not available") {
+		t.Errorf("problem = %+v", p)
+	}
+}
+
+func TestFinishRestoreDumpNeedsForceForTablesInPostgres(t *testing.T) {
+	f, m := dumped(t, "postgres")
+	f.fake.Responses[f.tool("16", "psql")+" -w -X --dbname postgres --tuples-only --no-align --command "+relationQuery] = runner.Response{Stdout: "3\n"}
+	res := f.finish(m, true, false)
+	if !module.HasBlocker(res.Problems) || !strings.Contains(res.Problems[0].Fix, "--restore-dump --force") || f.ran(f.tool("16", "psql")+restoreLine) != nil {
+		t.Errorf("finish = %+v, want a refusal", res)
+	}
+	if res := f.finish(m, true, true); len(res.Problems) != 0 || f.ran(f.tool("16", "psql")+restoreLine) == nil {
+		t.Errorf("finish --force = %+v, want the dump restored", res)
+	}
+}
+
+func TestFinishAndVerifyReachTheServerThroughThisMacsPostmasterPID(t *testing.T) {
+	f, m := dumped(t, "postgres")
+	os.Remove(filepath.Join(f.mod.Var, "postgresql@16", "postmaster.pid"))
+	res := f.finish(m, true, false)
+	if !module.HasBlocker(res.Problems) || f.ran(f.tool("16", "psql")+restoreLine) != nil {
+		t.Errorf("finish = %+v, want a refusal", res)
+	}
+	if c := f.verify(m); c.Status != module.StatusFail || !strings.Contains(c.Detail, "brew services start 'postgresql@16'") {
+		t.Errorf("check = %+v, want not running", c)
+	}
+}
+
+func TestScanTreatsARelativeSocketFolderAsNone(t *testing.T) {
+	f := newFixture(t)
+	f.cluster("postgresql@16", "16", false)
+	testutil.WriteFile(t, filepath.Join(f.mod.Var, "postgresql@16", "postmaster.pid"), "1\n/x\n1\n5432\nsockets\n*\n")
+	findings, err := f.mod.Scan(f.env(nil))
+	if err != nil || !slices.Equal(ids(findings), []string{"socket:postgresql@16"}) || len(f.fake.Calls()) != 0 {
+		t.Errorf("Scan = %+v, %v, calls %d", findings, err, len(f.fake.Calls()))
 	}
 }
