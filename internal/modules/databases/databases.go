@@ -264,18 +264,23 @@ func (m Module) Prepare(env module.Env, _ *stage.Stage) (module.Result, error) {
 
 func (m Module) prepareCluster(env module.Env, c Cluster, previous Inventory) (Cluster, string, *module.Finding) {
 	live, problem := m.live(env, c)
+	earlier, wasRunning := earlierRunning(previous, c.Name)
 	if problem != nil {
+		// A stale postmaster.pid says nothing about what the cluster held, so
+		// an earlier record of it still stands.
+		if wasRunning {
+			return keepIfDumpIntact(env, earlier), "", problem
+		}
 		return live, "", problem
 	}
 	if !live.Running {
 		// A cluster that stopped since the earlier prepare dumped it, as the
 		// homebrew module leaves it, hasn't changed since that dump.
-		if i := slices.IndexFunc(previous.Clusters, func(p Cluster) bool { return p.Name == c.Name }); i >= 0 && previous.Clusters[i].Running {
-			p := previous.Clusters[i]
-			if p.Dump != nil && env.Exports.CheckArtifact(*p.Dump) == nil {
+		if wasRunning {
+			p := keepIfDumpIntact(env, earlier)
+			if p.Dump != nil {
 				return p, "kept the dump of " + c.Name + " from the earlier prepare", nil
 			}
-			p.Dump = nil
 			return p, "", &module.Finding{Module: Name, ID: "dump:" + c.Name, Severity: module.SeverityWarn, Handler: module.Manual,
 				Title: c.Name + " has stopped, so mtm can't save a dump of it",
 				Fix:   "To save one, run: " + startThenPrepare(c) + ". Migration Assistant still copies its data folder."}
@@ -299,6 +304,23 @@ func (m Module) prepareCluster(env module.Env, c Cluster, previous Inventory) (C
 	}
 	c.Dump = &a
 	return c, fmt.Sprintf("saved a dump of %s (%s, %s)", c.Name, words.Count(len(dbs), "database", "databases"), words.Bytes(uint64(a.Size))), nil
+}
+
+func earlierRunning(previous Inventory, name string) (Cluster, bool) {
+	i := slices.IndexFunc(previous.Clusters, func(p Cluster) bool { return p.Name == name })
+	if i < 0 || !previous.Clusters[i].Running {
+		return Cluster{}, false
+	}
+	return previous.Clusters[i], true
+}
+
+// keepIfDumpIntact returns the earlier record, without its dump unless the
+// dump still matches its fingerprint.
+func keepIfDumpIntact(env module.Env, p Cluster) Cluster {
+	if p.Dump != nil && env.Exports.CheckArtifact(*p.Dump) != nil {
+		p.Dump = nil
+	}
+	return p
 }
 
 // startThenPrepare is the fix for a dump that needs the server running:
@@ -347,6 +369,16 @@ func (m Module) Finish(env module.Env, _ *stage.Stage) (module.Result, error) {
 	return res, nil
 }
 
+// notRunningFix is the recovery for a cluster whose server won't answer.
+// Homebrew's post_install skips initdb when PG_VERSION exists, so a data
+// folder that is there but unusable has to be moved aside first. mtm only
+// prints the commands.
+func (m Module) notRunningFix(c Cluster) string {
+	svc, dir := macos.ShellQuote(service(c)), macos.ShellQuote(m.dataDir(c))
+	return "If its data folder didn't arrive or won't start, move it aside: mv " + dir + " " + dir + ".old, then create an empty one: brew postinstall " + svc +
+		". Then run: brew services start " + svc + " && mtm finish --only databases --restore-dump"
+}
+
 func restoreProblem(c Cluster, title, detail, fix string) *module.Finding {
 	return &module.Finding{Module: Name, ID: "restore:" + c.Name, Severity: module.SeverityBlocker, Handler: module.Manual,
 		Title: title, Detail: detail, Fix: fix}
@@ -357,11 +389,9 @@ func restoreProblem(c Cluster, title, detail, fix string) *module.Finding {
 // databases or tables could end up mixing two Macs' data, so it needs
 // --force. It returns a blocker, or the done line and perhaps a warning.
 func (m Module) restore(env module.Env, c Cluster) (string, *module.Finding, *module.Finding) {
-	svc := macos.ShellQuote(service(c))
 	live, problem := m.live(env, Cluster{Name: c.Name, Major: c.Major})
 	if problem != nil || !live.Running {
-		return "", nil, restoreProblem(c, c.Name+" isn't running", "",
-			"If its data folder didn't arrive, create an empty one with: brew postinstall "+svc+". Then run: brew services start "+svc+" && mtm finish --only databases --restore-dump")
+		return "", nil, restoreProblem(c, c.Name+" isn't running", "", m.notRunningFix(c))
 	}
 	again := "Fix the cause above, then run mtm finish --only databases --restore-dump again."
 	dbs, err := m.databases(env, live)
@@ -389,7 +419,7 @@ func (m Module) restore(env module.Env, c Cluster) (string, *module.Finding, *mo
 	}
 	stderr, err := m.load(env, live, *c.Dump)
 	if err != nil {
-		return "", nil, restoreProblem(c, "Could not restore "+c.Name, err.Error(), again)
+		return "", nil, restoreProblem(c, "Could not restore "+c.Name, loadFailure(err, stderr), again)
 	}
 	done := "restored " + c.Name + " from its dump"
 	if n := countErrors(stderr); n > 0 {
@@ -398,6 +428,20 @@ func (m Module) restore(env module.Env, c Cluster) (string, *module.Finding, *mo
 			Fix:   "Check that its databases hold what you expect; a missing extension is a common cause."}, nil
 	}
 	return done, nil, nil
+}
+
+// loadFailure describes a failed psql load without its output: stderr
+// quotes the rows and statements it choked on, which are the user's data.
+func loadFailure(err error, stderr []byte) string {
+	code, ok := runner.ExitCode(err)
+	if !ok {
+		return err.Error()
+	}
+	detail := fmt.Sprintf("psql exited with status %d", code)
+	if n := countErrors(stderr); n > 0 {
+		detail += ", after " + words.Count(n, "error", "errors")
+	}
+	return detail
 }
 
 // countErrors counts psql's ERROR lines, leaving out the existing role.
@@ -450,15 +494,19 @@ func (m Module) check(env module.Env, c Cluster) module.Check {
 		}
 		return ch
 	}
-	svc := macos.ShellQuote(service(c))
 	live, problem := m.live(env, Cluster{Name: c.Name, Major: c.Major})
 	if problem != nil || !live.Running {
-		ch.Status, ch.Detail = module.StatusFail, "not running; run: brew services start "+svc+". If it won't start: mtm finish --only databases --restore-dump"
+		svc := macos.ShellQuote(service(c))
+		ch.Status, ch.Detail = module.StatusFail, "not running; run: brew services start "+svc+". "+m.notRunningFix(c)
 		return ch
 	}
 	dbs, err := m.databases(env, live)
 	if err != nil {
 		ch.Status, ch.Detail = module.StatusFail, err.Error()
+		return ch
+	}
+	if len(c.Databases) == 0 {
+		ch.Detail = "running; prepare recorded no database names to compare"
 		return ch
 	}
 	var missing []string

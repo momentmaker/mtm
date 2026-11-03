@@ -302,6 +302,10 @@ func TestFinishRestoreDumpNeedsTheServerRunning(t *testing.T) {
 	if !module.HasBlocker(res.Problems) || !strings.Contains(res.Problems[0].Fix, "brew postinstall 'postgresql@16'") {
 		t.Errorf("finish = %+v", res)
 	}
+	dir := f.mod.dataDir(Cluster{Name: "postgresql@16"})
+	if want := "move it aside: mv '" + dir + "' '" + dir + "'.old, then create an empty one: brew postinstall"; !strings.Contains(res.Problems[0].Fix, want) {
+		t.Errorf("fix = %q, want it to move the data folder aside first", res.Problems[0].Fix)
+	}
 }
 
 func TestFinishRestoreDumpRefusesAChangedDump(t *testing.T) {
@@ -334,8 +338,8 @@ func TestVerifyRunningClusterHasItsDatabases(t *testing.T) {
 		t.Errorf("check = %+v, want app missing", c)
 	}
 	f.fake.Responses[f.tool("16", "pg_isready")+" --quiet"] = runner.Response{Code: 2}
-	if c := f.verify(m); c.Status != module.StatusFail || !strings.Contains(c.Detail, "brew services start 'postgresql@16'") {
-		t.Errorf("check = %+v, want not running", c)
+	if c := f.verify(m); c.Status != module.StatusFail || !strings.Contains(c.Detail, "brew services start 'postgresql@16'") || !strings.Contains(c.Detail, "move it aside: mv ") {
+		t.Errorf("check = %+v, want not running, with the move-aside advice", c)
 	}
 }
 
@@ -415,5 +419,53 @@ func TestScanTreatsARelativeSocketFolderAsNone(t *testing.T) {
 	findings, err := f.mod.Scan(f.env(nil))
 	if err != nil || !slices.Equal(ids(findings), []string{"socket:postgresql@16"}) || len(f.fake.Calls()) != 0 {
 		t.Errorf("Scan = %+v, %v, calls %d", findings, err, len(f.fake.Calls()))
+	}
+}
+
+func TestPrepareAgainKeepsTheRecordWhenThePostmasterPIDIsStale(t *testing.T) {
+	f, m := dumped(t, "app", "postgres")
+	var earlier Inventory
+	m.Module(Name, &earlier)
+	f.fake.Responses[f.tool("16", "pg_isready")+" --quiet"] = runner.Response{Code: 2}
+	res, inv := f.prepare(m)
+	c := inv.Clusters[0]
+	if !c.Running || c.Dump == nil || *c.Dump != *earlier.Clusters[0].Dump || !slices.Equal(c.Databases, []string{"app", "postgres"}) {
+		t.Errorf("cluster = %+v, want the earlier record kept", c)
+	}
+	if !slices.Equal(ids(res.Problems), []string{"answer:postgresql@16"}) {
+		t.Errorf("problems = %+v, want the answer warning", res.Problems)
+	}
+}
+
+func TestPrepareAgainDropsAKeptDumpThatChanged(t *testing.T) {
+	f, m := dumped(t, "app", "postgres")
+	var earlier Inventory
+	m.Module(Name, &earlier)
+	os.WriteFile(f.exports.Path(earlier.Clusters[0].Dump.Name), []byte("tampered"), 0o600)
+	f.fake.Responses[f.tool("16", "pg_isready")+" --quiet"] = runner.Response{Code: 2}
+	_, inv := f.prepare(m)
+	if c := inv.Clusters[0]; !c.Running || c.Dump != nil {
+		t.Errorf("cluster = %+v, want Running kept and the damaged dump dropped", c)
+	}
+}
+
+func TestFinishRestoreFailureDetailHasNoPsqlOutput(t *testing.T) {
+	f, m := dumped(t, "postgres")
+	f.fake.Responses[f.tool("16", "psql")+restoreLine] = runner.Response{Code: 3, Stderr: "psql:-:7: ERROR:  duplicate key value (email)=(ada@example.com)\n"}
+	res := f.finish(m, true, false)
+	p := res.Problems[0]
+	if p.Detail != "psql exited with status 3, after 1 error" || strings.Contains(p.Title+p.Detail+p.Fix, "ada@example.com") {
+		t.Errorf("problem = %+v, want only the status and a count", p)
+	}
+}
+
+func TestVerifyPassesARunningClusterWithNoRecordedNamesHonestly(t *testing.T) {
+	f := newFixture(t)
+	f.cluster("postgresql@16", "16", true)
+	f.serve("postgres")
+	m := record(t, Inventory{Clusters: []Cluster{{Name: "postgresql@16", Major: "16", Running: true}}})
+	c := f.verify(m)
+	if c.Status != module.StatusPass || c.Detail != "running; prepare recorded no database names to compare" {
+		t.Errorf("check = %+v", c)
 	}
 }
