@@ -22,7 +22,7 @@ func sampleList() checklist.List {
 func TestChecklistShowsOpenStepsWithTheirCommand(t *testing.T) {
 	var out bytes.Buffer
 	Checklist(&out, sampleList(), false)
-	for _, want := range []string{"1 step open", "☐ Give Raycast Accessibility access", "System Settings > Privacy & Security > Accessibility", "→ mtm checklist done permissions:com.raycast.macos:Accessibility"} {
+	for _, want := range []string{"1 step open", "☐ Give Raycast Accessibility access", "System Settings > Privacy & Security > Accessibility", "→ mtm checklist done 'permissions:com.raycast.macos:Accessibility'"} {
 		if !strings.Contains(out.String(), want) {
 			t.Errorf("output missing %q:\n%s", want, out.String())
 		}
@@ -59,4 +59,14 @@ func TestStepEscapesControlCharacters(t *testing.T) {
 	var out bytes.Buffer
 	Step(&out, 1, 2, checklist.Entry{Item: checklist.Item{Title: "Give \x1b[2JEvil access"}})
 	assertNoRawControls(t, out.String())
+}
+
+func TestChecklistQuotesAnIdWithSpacesInItsCommand(t *testing.T) {
+	var l checklist.List
+	l.Add(checklist.Item{ID: "permissions:com.raycast.macos:Screen Recording", Title: "Give Raycast Screen Recording access"})
+	var out bytes.Buffer
+	Checklist(&out, l, false)
+	if want := "→ mtm checklist done 'permissions:com.raycast.macos:Screen Recording'"; !strings.Contains(out.String(), want) {
+		t.Errorf("output missing %q:\n%s", want, out.String())
+	}
 }

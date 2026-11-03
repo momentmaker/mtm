@@ -77,10 +77,15 @@ func (m Module) read(env module.Env) (grants []Grant, readable bool, err error) 
 }
 
 func (m Module) readDB(env module.Env, db string) ([]Grant, bool, error) {
-	out, err := env.Run.Run(env.Ctx, runner.Command{Name: "/usr/bin/sqlite3", Args: []string{"-readonly", "-json", db, query}})
+	out, err := env.Run.Run(env.Ctx, runner.Command{Name: "/usr/bin/sqlite3", Args: []string{"-init", "/dev/null", "-readonly", "-json", db, query}})
 	var ee *runner.ExitError
-	if errors.As(err, &ee) && (strings.Contains(ee.Stderr, "authorization denied") || strings.Contains(ee.Stderr, "unable to open")) {
-		return nil, false, nil
+	if errors.As(err, &ee) {
+		switch {
+		case strings.Contains(ee.Stderr, "authorization denied"):
+			return nil, false, nil
+		case strings.Contains(ee.Stderr, "unable to open database file"):
+			return nil, true, nil
+		}
 	}
 	if err != nil {
 		return nil, false, fmt.Errorf("read %s: %w", db, err)
@@ -165,16 +170,19 @@ type recordedApp struct {
 	BundleID string `json:"bundle_id"`
 }
 
-func recordedApps(env module.Env) []recordedApp {
+func recordedApps(env module.Env) ([]recordedApp, error) {
 	var sys struct {
 		Apps []recordedApp `json:"apps"`
 	}
 	// Without a system record there are no names or catalog matches, but
 	// grants read from the privacy databases still make steps.
 	if _, err := module.LoadInventory(env, "system", &sys); err != nil {
-		return nil
+		if errors.Is(err, module.ErrNotPrepared) {
+			return nil, nil
+		}
+		return nil, err
 	}
-	return sys.Apps
+	return sys.Apps, nil
 }
 
 // expected is the grants the new Mac should have: those recorded, or with
@@ -191,7 +199,8 @@ func (m Module) expected(env module.Env, inv Inventory, apps []recordedApp) []Gr
 		}
 		for _, p := range entry.Permissions {
 			svc, _ := catalog.ServiceNamed(p.Service)
-			out = append(out, Grant{Service: svc.TCC, Client: p.ClientFor(entry)})
+			client := p.ClientFor(entry)
+			out = append(out, Grant{Service: svc.TCC, Client: client, Path: filepath.IsAbs(client)})
 		}
 	}
 	return out
@@ -235,7 +244,10 @@ func (m Module) steps(env module.Env, inv Inventory) ([]checklist.Item, []Grant,
 	if err != nil {
 		return nil, nil, err
 	}
-	apps := recordedApps(env)
+	apps, err := recordedApps(env)
+	if err != nil {
+		return nil, nil, err
+	}
 	var items []checklist.Item
 	var grants []Grant
 	for _, g := range m.expected(env, inv, apps) {

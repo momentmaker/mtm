@@ -5,6 +5,7 @@ import (
 	"io"
 
 	"github.com/momentmaker/mtm/internal/checklist"
+	"github.com/momentmaker/mtm/internal/macos"
 	"github.com/momentmaker/mtm/internal/words"
 )
 
@@ -39,7 +40,7 @@ func Checklist(w io.Writer, l checklist.List, all bool) {
 		writeStepBody(w, e)
 		switch e.Status {
 		case checklist.Pending:
-			fmt.Fprintf(w, "      → mtm checklist done %s\n", clean(e.ID))
+			fmt.Fprintf(w, "      → mtm checklist done %s\n", clean(macos.ShellQuote(e.ID)))
 		case checklist.Skipped:
 			fmt.Fprintf(w, "      skipped: %s\n", clean(e.Reason))
 		}

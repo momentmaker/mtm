@@ -397,9 +397,11 @@ Otherwise **NOT SAFE TO WIPE**, followed by the blocking items. Exit codes: `0` 
 - `verify` warns when an agent that was loaded isn't now, and lists the login items to add again (info).
 
 ### 9.8 `permissions`
-- **Reading grants.** It reads the user's privacy database (`~/Library/Application Support/com.apple.TCC/TCC.db`) and the system one (`/Library/Application Support/com.apple.TCC/TCC.db`) with `/usr/bin/sqlite3 -readonly -json`.
+- **Reading grants.** It reads the user's privacy database (`~/Library/Application Support/com.apple.TCC/TCC.db`) and the system one (`/Library/Application Support/com.apple.TCC/TCC.db`) with `/usr/bin/sqlite3 -init /dev/null -readonly -json`; `-init /dev/null` keeps a user's `.sqliterc` from changing the output.
   - It selects only granted rows (`auth_value = 2`), and only service, client, client type, and, for Automation, the target app.
-  - macOS refuses to open either database without Full Disk Access ("authorization denied"). That refusal is how `mtm` tells Full Disk Access is missing; any other sqlite3 error is a failure.
+  - macOS refuses to open either database without Full Disk Access ("authorization denied"). That refusal is how `mtm` tells Full Disk Access is missing.
+  - A database that doesn't exist yet, as on a new account ("unable to open database file"), holds no grants.
+  - Any other sqlite3 error is a failure.
 - **`scan`:** with Full Disk Access, an info finding with the number of grants. Without it, a warn: `mtm` will use its catalog instead. The fix is to give the terminal Full Disk Access.
 - **`prepare`:** records the grants (source `tcc`). Without Full Disk Access it records source `catalog` and warns the same way.
 - **`finish`:** creates one checklist item per expected grant, with the pane's name and its deep link for this Mac's macOS.

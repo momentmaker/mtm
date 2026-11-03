@@ -32,6 +32,8 @@ const systemRows = `[{"service":"kTCCServiceAccessibility","client":"com.raycast
 
 var denied = runner.Response{Code: 1, Stderr: `Error: unable to open database "` + systemDB + `": authorization denied`}
 
+var missing = runner.Response{Code: 1, Stderr: `Error: unable to open database "/Users/dev/Library/Application Support/com.apple.TCC/TCC.db": unable to open database file`}
+
 func testCatalog(t *testing.T) *catalog.Catalog {
 	t.Helper()
 	c, err := catalog.Load(fstest.MapFS{
@@ -58,7 +60,7 @@ func newFixture(t *testing.T) fixture {
 }
 
 func sqlite(db string) string {
-	return "/usr/bin/sqlite3 -readonly -json " + db + " " + query
+	return "/usr/bin/sqlite3 -init /dev/null -readonly -json " + db + " " + query
 }
 
 func (f fixture) answer(user, system runner.Response) {
@@ -236,4 +238,51 @@ func TestVerifyWithNothingExpectedHasNoChecks(t *testing.T) {
 	if err != nil || len(checks) != 0 {
 		t.Errorf("Verify = %+v, %v", checks, err)
 	}
+}
+
+func TestPrepareTreatsAMissingUserDatabaseAsNoGrants(t *testing.T) {
+	f := newFixture(t)
+	f.answer(missing, runner.Response{Stdout: systemRows})
+	res, err := f.mod.Prepare(f.env(nil), nil)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if inv := res.Inventory.(Inventory); inv.Source != "tcc" || len(inv.Grants) != 2 {
+		t.Errorf("inventory = %+v", inv)
+	}
+}
+
+func TestFinishFailsOnAnUnreadableSystemRecord(t *testing.T) {
+	f := newFixture(t)
+	m := manifest.New("test")
+	if err := m.SetModule(Name, time.Now(), Inventory{Source: "catalog"}); err != nil {
+		t.Fatal(err)
+	}
+	if err := m.SetModule("system", time.Now(), map[string]any{"apps": "nope"}); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := f.mod.Finish(f.env(m), nil); err == nil {
+		t.Error("Finish succeeded on a malformed system record")
+	}
+}
+
+func TestFinishFromTheCatalogKeepsAbsoluteClientsAsPaths(t *testing.T) {
+	f := newFixture(t)
+	f.mod.Catalog = pathCatalog(t)
+	m := record(t, Inventory{Source: "catalog"}, recordedApp{Path: "/Applications/Tool.app", BundleID: "com.example.tool"})
+	items := finishSteps(t, f, m)
+	if len(items) != 1 || items[0].Title != "Give tool Full Disk Access" || items[0].ID != "permissions:/usr/local/bin/tool:Full Disk Access" {
+		t.Errorf("steps = %+v", items)
+	}
+}
+
+func pathCatalog(t *testing.T) *catalog.Catalog {
+	t.Helper()
+	c, err := catalog.Load(fstest.MapFS{
+		"tool.toml": {Data: []byte("id = \"tool\"\nname = \"Tool\"\nbundle_id = \"com.example.tool\"\n\n[[permissions]]\nservice = \"Full Disk Access\"\nclient = \"/usr/local/bin/tool\"\n")},
+	})
+	if err != nil {
+		t.Fatal(err)
+	}
+	return c
 }

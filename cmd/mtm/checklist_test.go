@@ -66,7 +66,7 @@ func TestChecklistWithoutATerminalListsTheOpenSteps(t *testing.T) {
 	notTerminal(t)
 	var out, errOut bytes.Buffer
 	code := run(ctx, []string{"checklist"}, &out, &errOut, newApp)
-	if code != exitOK || !strings.Contains(out.String(), "2 steps open") || !strings.Contains(out.String(), "mtm checklist done system:license:dash") {
+	if code != exitOK || !strings.Contains(out.String(), "2 steps open") || !strings.Contains(out.String(), "mtm checklist done 'system:license:dash'") {
 		t.Errorf("exit %d:\n%s%s", code, out.String(), errOut.String())
 	}
 }
