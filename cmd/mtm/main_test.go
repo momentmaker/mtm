@@ -197,7 +197,8 @@ func TestPrepareUndoWithoutRecordFails(t *testing.T) {
 }
 
 // undoer stands in for a module whose prepare changes the Mac, such as
-// homebrew stopping services, so undo has something to put back.
+// homebrew stopping services, so undo and finish have something to put
+// back.
 type undoer struct{}
 
 func (undoer) Name() string                              { return "fake" }
@@ -205,16 +206,22 @@ func (undoer) Scan(module.Env) ([]module.Finding, error) { return nil, nil }
 func (undoer) Prepare(module.Env, *stage.Stage) (module.Result, error) {
 	return module.Result{Inventory: struct{}{}}, nil
 }
-func (undoer) Finish(module.Env, *stage.Stage) (module.Result, error)  { return module.Result{}, nil }
+func (undoer) Finish(module.Env, *stage.Stage) (module.Result, error) {
+	return module.Result{Done: []string{"started postgresql@16"}}, nil
+}
 func (undoer) Verify(module.Env, *stage.Stage) ([]module.Check, error) { return nil, nil }
 func (undoer) Undo(module.Env, *stage.Stage) (module.Result, error) {
 	return module.Result{Done: []string{"started postgresql@16"}}, nil
 }
 
-func undoerApp(home string) *app.App {
-	responses := testutil.MacResponses("OLD-MAC")
-	responses["/usr/bin/tmutil addexclusion "+filepath.Join(home, stage.DirName)] = runner.Response{}
-	return &app.App{Runner: &runner.Fake{Responses: responses}, Home: home, Version: "test", Now: time.Now, Modules: []module.Module{undoer{}}}
+// undoerMac builds an app with only undoer, for the Mac whose hardware
+// UUID is uuid.
+func undoerMac(uuid string) func(home string) *app.App {
+	return func(home string) *app.App {
+		responses := testutil.MacResponses(uuid)
+		responses["/usr/bin/tmutil addexclusion "+filepath.Join(home, stage.DirName)] = runner.Response{}
+		return &app.App{Runner: &runner.Fake{Responses: responses}, Home: home, Version: "test", Now: time.Now, Modules: []module.Module{undoer{}}}
+	}
 }
 
 func TestPrepareUndoReportsWhatItRestartedWhenTheRecordCannotBeSaved(t *testing.T) {
@@ -224,7 +231,7 @@ func TestPrepareUndoReportsWhatItRestartedWhenTheRecordCannotBeSaved(t *testing.
 	home := t.TempDir()
 	t.Setenv("HOME", home)
 	var out, errOut bytes.Buffer
-	if code := run(ctx, []string{"prepare"}, &out, &errOut, undoerApp); code != exitOK {
+	if code := run(ctx, []string{"prepare"}, &out, &errOut, undoerMac("OLD-MAC")); code != exitOK {
 		t.Fatalf("prepare exit %d\n%s%s", code, out.String(), errOut.String())
 	}
 	// Undo can still read the record and write its log, which has its own
@@ -236,9 +243,34 @@ func TestPrepareUndoReportsWhatItRestartedWhenTheRecordCannotBeSaved(t *testing.
 	t.Cleanup(func() { os.Chmod(root, 0o700) })
 	out.Reset()
 	errOut.Reset()
-	code := run(ctx, []string{"prepare", "--undo"}, &out, &errOut, undoerApp)
+	code := run(ctx, []string{"prepare", "--undo"}, &out, &errOut, undoerMac("OLD-MAC"))
 	if code != exitFailed || !strings.Contains(out.String(), "✓ fake: started postgresql@16") || !strings.Contains(errOut.String(), "mtm prepare --undo:") {
 		t.Errorf("exit %d, want %d with the restart reported and the error:\nstdout:\n%s\nstderr:\n%s", code, exitFailed, out.String(), errOut.String())
+	}
+}
+
+func TestFinishReportsWhatItDidWhenTheChecklistCannotBeSaved(t *testing.T) {
+	if os.Geteuid() == 0 {
+		t.Skip("root writes to a read-only folder")
+	}
+	home := t.TempDir()
+	t.Setenv("HOME", home)
+	var out, errOut bytes.Buffer
+	if code := run(ctx, []string{"prepare"}, &out, &errOut, undoerMac("OLD-MAC")); code != exitOK {
+		t.Fatalf("prepare exit %d\n%s%s", code, out.String(), errOut.String())
+	}
+	// Finish can still read the record and write its log, which has its
+	// own folder, but not save state.json in a read-only ~/.mtm.
+	root := filepath.Join(home, stage.DirName)
+	if err := os.Chmod(root, 0o500); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.Chmod(root, 0o700) })
+	out.Reset()
+	errOut.Reset()
+	code := run(ctx, []string{"finish"}, &out, &errOut, undoerMac("NEW-MAC"))
+	if code != exitFailed || !strings.Contains(out.String(), "✓ fake: started postgresql@16") || !strings.Contains(errOut.String(), "mtm finish:") {
+		t.Errorf("exit %d, want %d with what finish did and the error:\nstdout:\n%s\nstderr:\n%s", code, exitFailed, out.String(), errOut.String())
 	}
 }
 

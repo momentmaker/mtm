@@ -17,6 +17,7 @@ import (
 	"github.com/momentmaker/mtm/internal/modules/git"
 	"github.com/momentmaker/mtm/internal/runner"
 	"github.com/momentmaker/mtm/internal/stage"
+	"github.com/momentmaker/mtm/internal/state"
 	"github.com/momentmaker/mtm/internal/testutil"
 )
 
@@ -527,6 +528,27 @@ func TestFinishRefusesOnTheOldMac(t *testing.T) {
 	}
 	if slices.Contains(calls, "finish") {
 		t.Error("finish ran on the old Mac")
+	}
+}
+
+func TestFinishWithADamagedStateChangesNothing(t *testing.T) {
+	old := t.TempDir()
+	var calls []string
+	step := stepModule{name: "svc", calls: &calls}
+	mustPrepare(t, stepApp(old, oldUUID, step))
+	newHome := migrate(t, old)
+	st, err := stage.Existing(newHome)
+	if err != nil {
+		t.Fatal(err)
+	}
+	if err := st.WriteFile(state.FileName, []byte("{not json")); err != nil {
+		t.Fatal(err)
+	}
+	if _, err := stepApp(newHome, newUUID, step).Finish(ctx, FinishOptions{}); err == nil {
+		t.Error("finish succeeded with a damaged state.json")
+	}
+	if slices.Contains(calls, "finish") {
+		t.Error("a module's finish ran before the damaged state.json stopped finish")
 	}
 }
 

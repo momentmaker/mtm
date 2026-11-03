@@ -333,6 +333,12 @@ func (a *App) Finish(ctx context.Context, opts FinishOptions) (StepReport, error
 	if info.MachineID == m.MachineID {
 		return StepReport{}, ErrFinishOnOldMac
 	}
+	// Read before any module acts, so a damaged state.json stops finish
+	// before it restarts or restores anything.
+	s, err := state.Load(st)
+	if err != nil {
+		return StepReport{}, err
+	}
 	env := a.env(ctx, module.NewMac, false, m, run, exportsFor(st, m))
 	env.Force, env.RestoreDump = opts.Force, opts.RestoreDump
 	var rep StepReport
@@ -346,10 +352,6 @@ func (a *App) Finish(ctx context.Context, opts FinishOptions) (StepReport, error
 			continue
 		}
 		rep.add(mod.Name(), res)
-	}
-	s, err := state.Load(st)
-	if err != nil {
-		return rep, err
 	}
 	added, failed := mergeSteps(env, mods, m, &s.Checklist)
 	for _, f := range failed {

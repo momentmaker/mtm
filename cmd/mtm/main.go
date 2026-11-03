@@ -233,6 +233,12 @@ func cmdFinish(ctx context.Context, a *app.App, args []string, stdout, stderr io
 		fmt.Fprintln(stderr, "mtm finish:", err)
 		return exitProblems
 	case err != nil:
+		// Finish can fail after modules restarted or restored things, when
+		// saving the checklist fails; the user still needs to know what
+		// it did.
+		if len(rep.Done) > 0 || len(rep.Problems) > 0 {
+			report.Finish(stdout, rep.Done, rep.Problems, rep.Pending)
+		}
 		fmt.Fprintln(stderr, "mtm finish:", err)
 		return exitFailed
 	}
