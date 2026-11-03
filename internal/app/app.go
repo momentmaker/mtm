@@ -341,8 +341,7 @@ func (a *App) Finish(ctx context.Context, opts FinishOptions) (StepReport, error
 	}
 	// Read before any module acts, so a damaged state.json stops finish
 	// before it restarts or restores anything.
-	s, err := state.Load(st)
-	if err != nil {
+	if _, err := state.Load(st); err != nil {
 		return StepReport{}, err
 	}
 	env := a.env(ctx, module.NewMac, false, m, run, exportsFor(st, m))
@@ -358,6 +357,12 @@ func (a *App) Finish(ctx context.Context, opts FinishOptions) (StepReport, error
 			continue
 		}
 		rep.add(mod.Name(), res)
+	}
+	// Read again: a restore can take minutes, and a step the user closed
+	// meanwhile with mtm checklist must stay closed.
+	s, err := state.Load(st)
+	if err != nil {
+		return rep, err
 	}
 	added, failed := mergeSteps(env, mods, m, &s.Checklist)
 	for _, f := range failed {
@@ -405,7 +410,7 @@ func mergeSteps(env module.Env, mods []module.Module, m *manifest.Manifest, l *c
 	return added, failed
 }
 
-// resolve marks done the pending checklist steps a passing check proved
+// resolve marks done the open checklist steps a passing check proved
 // done. A step the user already closed keeps what they recorded, such as a
 // skip's reason.
 func resolve(l *checklist.List, checks []module.Check, at time.Time) {
@@ -414,7 +419,7 @@ func resolve(l *checklist.List, checks []module.Check, at time.Time) {
 			continue
 		}
 		for _, id := range c.Resolves {
-			if e, ok := l.Find(id); ok && e.Status == checklist.Pending {
+			if e, ok := l.Find(id); ok && e.Open() {
 				l.Done(id, at)
 			}
 		}

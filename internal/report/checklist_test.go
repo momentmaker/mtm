@@ -43,7 +43,7 @@ func TestChecklistAllShowsSkippedStepsWithTheirReason(t *testing.T) {
 func TestChecklistEmptyAndFinished(t *testing.T) {
 	var out bytes.Buffer
 	Checklist(&out, checklist.List{}, false)
-	if !strings.Contains(out.String(), "mtm finish fills it") {
+	if !strings.Contains(out.String(), "mtm finish and mtm verify fill it") {
 		t.Errorf("empty output:\n%s", out.String())
 	}
 	l := sampleList()

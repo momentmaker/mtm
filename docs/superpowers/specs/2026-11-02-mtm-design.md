@@ -174,7 +174,7 @@ type Module interface {
 - Modules whose `prepare` changes the old Mac also implement `Undo(env, st) (Result, error)`, which `prepare --undo` calls. After a successful undo, that module's record is removed, so `verify` reports it not prepared until `prepare` runs again.
 - `Finding` has: module, id, severity (`info`, `warn`, `blocker`), handler (`migration-assistant`, `mtm`, `manual`), title, detail, fix.
 - `Result` has: what was done, artifacts written (each with its fingerprint), and problems.
-- Modules that leave steps for the user on the new Mac also implement `Steps(env) ([]checklist.Item, error)` (`Stepper`), which works from the record alone. On the new Mac, `finish` and `verify` both merge every recorded module's steps into `state.json`, so `verify` lists them even when `finish` didn't run, or ran with `--only`. A step already there keeps its status and gets the new text, so either command can run again. A `finish` that adds a step clears the last verify result, so `cleanup` waits for a new SAFE TO WIPE.
+- Modules that leave steps for the user on the new Mac also implement `Steps(env) ([]checklist.Item, error)` (`Stepper`), which works from the record alone. On the new Mac, `verify` merges every recorded module's steps into `state.json`, and `finish` those of the modules it ran, so `verify` lists them even when `finish` didn't run, or ran with `--only`. A step already there keeps its status and gets the new text, so either command can run again. A `finish` that adds a step clears the last verify result, so `cleanup` waits for a new SAFE TO WIPE.
 - A `Check` can name the checklist items it proves done (`Resolves`). When it passes, `verify` marks them done, as the `permissions` module does for each grant it finds.
 - `Check` has: module, id, status (`pass`, `fail`, `warn`, `info`), critical flag, title, detail.
 - Modules never print. All output goes through `report`.
@@ -396,7 +396,8 @@ Otherwise **NOT SAFE TO WIPE**, followed by the blocking items. Exit codes: `0` 
 ### 9.7 `loginitems`
 - Records each launch agent in `~/Library/LaunchAgents` (`*.plist` only), with its `Label` and whether it is loaded (`launchctl list`).
 - `prepare`, not `scan`, records login items through System Events (`osascript`). That triggers a one-time Automation permission prompt, which `scan` explains beforehand. If access is denied, `prepare` warns and asks the user to note their login items by hand.
-- `finish` bootstraps the launch agents that were loaded and aren't now (`launchctl bootstrap gui/<uid> <plist>`). A failure becomes a by-hand step pointing at Login Items approvals. `finish` also adds a checklist step for each login item to add again, with a link to Login Items. If `prepare` couldn't list them, the step is to note them on the old Mac first.
+- `finish` bootstraps the launch agents that were loaded and aren't now (`launchctl bootstrap gui/<uid> <plist>`). A failure becomes a by-hand step pointing at Login Items approvals.
+- **Checklist steps** (section 7.3): one for each login item to add again, with a link to Login Items. If `prepare` couldn't list them, the step is to note them on the old Mac first.
 - `verify` warns when an agent that was loaded isn't now, and lists the login items to add again (info).
 
 ### 9.8 `permissions`
@@ -407,7 +408,7 @@ Otherwise **NOT SAFE TO WIPE**, followed by the blocking items. Exit codes: `0` 
   - Any other sqlite3 error is a failure.
 - **`scan`:** with Full Disk Access, an info finding with the number of grants. Without it, a warn: `mtm` will use its catalog instead. The fix is to give the terminal Full Disk Access.
 - **`prepare`:** records the grants (source `tcc`). Without Full Disk Access it records source `catalog` and warns the same way.
-- **`finish`:** creates one checklist item per expected grant, with the pane's name and its deep link for this Mac's macOS.
+- **Checklist steps** (section 7.3): one per expected grant, with the pane's name and its deep link for this Mac's macOS.
   - The expected grants are the recorded ones. With a `catalog` record, they are what the catalog lists for the apps in the `system` module's record.
   - Grants for services System Settings doesn't show, which macOS uses internally, get no item.
   - Item ids are `permissions:<client>:<pane>`, plus `:<target>` for Automation.
@@ -440,8 +441,8 @@ Otherwise **NOT SAFE TO WIPE**, followed by the blocking items. Exit codes: `0` 
   - fingerprints of `/etc/hosts`, `/etc/shells`, `/etc/paths.d/*`, `/etc/pam.d/sudo_local` (Touch ID for sudo). Copies go into `~/.mtm/exports/etc/` so `finish` can print an exact restore command. These files hold configuration, not secrets;
   - app inventory of `/Applications` and `~/Applications`, including one level of subfolders, skipping Apple's own `com.apple.*` apps and symlinks. Each app records its bundle id, version (`plutil -extract … raw`), and architectures (`lipo -archs`). Home apps are recorded as `~/Applications/…`.
 - **`scan` and `prepare`:** warn about Intel-only apps. They need Rosetta on the new Mac, and Rosetta is limited after macOS 27.
+- **Checklist steps** (section 7.3): from the catalog, for the recorded apps: one to reactivate each license marked `reactivate`, and one per note.
 - **`finish`:**
-  - Adds checklist items from the catalog for the recorded apps: one to reactivate each license marked `reactivate`, and one per note.
   - Prints `sudo softwareupdate --install-rosetta --agree-to-license` if Rosetta is needed and missing.
   - For each `/etc` file that differs, prints `sudo install -m 0644 -o root -g wheel <copy> /etc/<file>`. `install` rather than `cp`, because the private copy is 0600 and `cp` would give a new `/etc` file that mode.
   - When the login shell changed, prints one line to paste: `echo <shell> | sudo tee -a /etc/shells >/dev/null && chsh -s <shell>`, without the `tee` part if the shell is already listed.

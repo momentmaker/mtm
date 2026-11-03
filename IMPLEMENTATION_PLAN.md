@@ -140,7 +140,8 @@ Found in the final review.
 
 **Success Criteria**: `retire` lists a file changed on the old Mac after `prepare`. SSH and GPG identities are critical checks.
 **Tests**: module unit tests with fixtures; a `retire` integration test on a temp home folder.
-**Status**: Not Started
+**Plan**: `docs/superpowers/plans/2026-11-03-mtm-stage4-part2-browsers-secrets-retire.md`
+**Status**: In Progress
 
 ## Stage 5: Ship
 **Goal**: GitHub Actions CI on Apple Silicon (`go test`, `go vet`, `gofmt`, `govulncheck`, catalog validation); end-to-end tests in Tart VMs (cloned VM as a perfect migration, injected faults); release builds with checksums and provenance attestations; a Homebrew tap; README and contributor guide (including how to add a catalog app).

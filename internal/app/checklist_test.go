@@ -266,3 +266,37 @@ func TestVerifyOnTheOldMacLeavesNoStepsToCarryOver(t *testing.T) {
 		t.Errorf("new Mac's pending = %q, want %q", rep.Verdict.Pending, want)
 	}
 }
+
+// answersMidFinish is stepsModule with a finish slow enough for the user to
+// close a step with mtm checklist in another terminal meanwhile.
+type answersMidFinish struct {
+	stepsModule
+	answer func()
+}
+
+func (m answersMidFinish) Finish(module.Env, *stage.Stage) (module.Result, error) {
+	m.answer()
+	return module.Result{}, nil
+}
+
+func TestFinishKeepsAnAnswerGivenWhileItRuns(t *testing.T) {
+	newHome := finishedNewMac(t, stepsModule{})
+	mod := answersMidFinish{answer: func() { skip(t, newHome, licenseStep.ID, "sold the license", time.Now()) }}
+	if _, err := stepApp(newHome, newUUID, mod).Finish(ctx, FinishOptions{}); err != nil {
+		t.Fatal(err)
+	}
+	if e, _ := loadState(t, newHome).Checklist.Find(licenseStep.ID); e.Status != checklist.Skipped {
+		t.Errorf("license step = %+v, want the skip given during finish", e)
+	}
+}
+
+func TestResolveClosesEveryKindOfOpenStep(t *testing.T) {
+	l := checklist.List{Entries: []checklist.Entry{
+		{Item: grantStep, Status: ""},
+		{Item: licenseStep, Status: checklist.Skipped},
+	}}
+	resolve(&l, []module.Check{{ID: "steps:all", Status: module.StatusPass, Resolves: []string{grantStep.ID, licenseStep.ID}}}, time.Now())
+	if open := l.Pending(); len(open) != 0 {
+		t.Errorf("open steps = %+v, want none", open)
+	}
+}

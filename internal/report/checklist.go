@@ -24,7 +24,7 @@ func stepSymbol(e checklist.Entry) string {
 func Checklist(w io.Writer, l checklist.List, all bool) {
 	open := len(l.Pending())
 	if len(l.Entries) == 0 {
-		fmt.Fprintln(w, "The checklist is empty. mtm finish fills it on the new Mac.")
+		fmt.Fprintln(w, "The checklist is empty. mtm finish and mtm verify fill it on the new Mac.")
 		return
 	}
 	if open == 0 && !all {
