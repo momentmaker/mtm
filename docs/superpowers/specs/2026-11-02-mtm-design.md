@@ -82,7 +82,7 @@ Apple publishes no list of what Migration Assistant skips. The findings below co
 | 5 | New Mac | `mtm checklist` | Walks through the manual steps. Each opens the right System Settings pane or app and waits for done, or for a skip with a reason. |
 | 6 | New Mac | `mtm verify` | Compares the new Mac with the record. Prints **SAFE TO WIPE** or **NOT SAFE TO WIPE** with the reasons. Can be run any number of times. |
 | 7 | Old Mac | `mtm retire` | Lists anything on the old Mac that changed after `prepare`. Then walks through deactivating licenses, signing out of iCloud and turning off Find My, removing old Secure Enclave keys from services, and "Erase All Content and Settings". `mtm` never erases anything itself. |
-| 8 | New Mac | `mtm cleanup` | After SAFE TO WIPE, deletes the exports and the record. Reminds the user to revoke the terminal's Full Disk Access. Refuses before SAFE TO WIPE unless `--force` is passed. |
+| 8 | New Mac | `mtm cleanup` | After SAFE TO WIPE, deletes the exports and the record, including a `prepare --stage` folder when its drive is attached. Reminds the user to revoke the terminal's Full Disk Access. Refuses before SAFE TO WIPE unless `--force` is passed. |
 
 Every command can be re-run. `scan` and `verify` accept `--json`. `prepare`, `finish`, and `verify` accept `--only <module>`.
 
@@ -103,14 +103,14 @@ Every command can be re-run. `scan` and `verify` accept `--json`. `prepare`, `fi
 1. **It never reads secret contents.** No keychain secrets, private keys, cookies, or saved passwords. Presence checks only: for example, `security find-generic-password -s "Chrome Safe Storage"` without `-w` or `-g`, which does not reveal the value. Secret files are fingerprinted (SHA-256) and never copied or printed.
 2. **It never makes network connections.** No telemetry, no update checks, no listening ports. Steps that need the network, such as pulling registry images, are printed for the user to run.
 3. **It never weakens security.** It never turns off SIP or lowers the boot security policy, and it never stores the user's password. Steps that need root are printed as exact commands for the user to run with `sudo`.
-4. **It never deletes or overwrites user data.** `prepare` only writes inside `~/.mtm/`. Restores refuse to overwrite a non-empty Docker volume or database without `--force`. `cleanup` deletes only `~/.mtm/`.
+4. **It never deletes or overwrites user data.** `prepare` only writes inside `~/.mtm/` (or the `--stage` folder). A Docker volume that holds data is never overwritten: `mtm` prints the commands that remove it, and once the user runs them, `finish` restores the volume. A database restore refuses on a non-empty cluster without `--force`. `cleanup` deletes only `~/.mtm/` and the `--stage` folder.
 5. **It never reads cloud-only files** (section 8.3), which would trigger downloads.
 
 ### 6.3 Protecting what `mtm` creates
 - `~/.mtm/` is created with mode `0700` and its files with `0600`. `mtm` refuses to run if the directory exists with looser permissions or a different owner.
 - `~/.mtm/` is excluded from Time Machine with `tmutil addexclusion`.
 - **FileVault must be on** on both Macs (`fdesetup status`). `prepare` and `finish` refuse to run without it. On a FileVault disk the exports are no more exposed than the original data beside them, so `mtm` adds no separate encryption there.
-- **External staging** (`prepare --stage /Volumes/X`) is allowed only on an encrypted APFS volume, checked with `diskutil info`. `mtm` uses Apple's encryption and implements no cryptography of its own.
+- **External staging** (`prepare --stage /Volumes/X`) is allowed only on an encrypted APFS volume that honors file ownership. `statfs` gives the file system type and the ignore-ownership flag; `diskutil info -plist` gives encryption. Exports go in `<folder>/mtm-exports`, created with mode `0700` and excluded from Time Machine, and the manifest records that path for `finish`. `mtm` uses Apple's encryption and implements no cryptography of its own.
 - Every export gets a SHA-256 fingerprint in `manifest.json` when written. `finish` checks the fingerprint before restoring and refuses on a mismatch.
 - Reports and logs contain paths, counts, and statuses only, never fingerprints, file contents, or environment values. Command arguments are logged with values of known secret flags and environment variables redacted. Reports are safe to paste into a public issue.
 
@@ -210,9 +210,11 @@ volatile = ["~/Library/Application Support/com.raycast.macos/*.log"]
                      prepare time, per-module inventories, export fingerprints, checklist items
   files.jsonl.gz     file record, one JSON object per line
   Brewfile           output of brew bundle dump, kept as a fallback
-  exports/
-    docker/          volume and image archives
-    postgres/        pg_dumpall output, gzip-compressed
+  exports/           or <stage folder>/mtm-exports with prepare --stage
+    docker/volumes/  one <volume>.tar.gz per volume (docker cp output, gzip-compressed)
+    docker/images/   one <image id>.tar per locally built image (docker image save output)
+    postgres/        one <cluster>.sql.gz per running cluster (pg_dumpall output)
+  docker-finish.json new Mac only: volumes finish found intact or restored
   state.json         new Mac only: checklist progress, last verify result
   logs/              one log file per command run, redacted
 ```
@@ -320,27 +322,61 @@ Otherwise **NOT SAFE TO WIPE**, followed by the blocking items. Exit codes: `0` 
 - `verify` requires the same paths and versions on the new Mac. A difference, a missing tool, or a login shell that no longer prints a PATH is a fail, with both values shown.
 
 ### 9.5 `docker` (Docker Desktop)
+- **Which Docker.** `mtm` runs Docker Desktop's own CLI (`/Applications/Docker.app/Contents/Resources/bin/docker`), not whichever `docker` is first on `PATH`, so the client matches the engine. Every command sets `DOCKER_HOST=unix://~/.docker/run/docker.sock` and unsets `DOCKER_CONTEXT`. A context or a `DOCKER_HOST` the user set could otherwise point `mtm` at another machine. The socket lives in the home folder, so a test run with a temporary `HOME` can't reach the developer's real Docker. Docker Desktop counts as running when that socket exists and `docker version` reaches the engine.
+- **Pulled or built.** With Docker's containerd image store (the default in current Docker Desktop), every image has a repo digest, built ones too, so repo digests can't tell the two apart. Docker Engine 29 records where an image came from: `Identity.Pull` for a pulled image, `Identity.Build` for a built one, and neither for an imported or loaded one. With the containerd store (its `docker image inspect` has a `Descriptor`), an image counts as pulled only when `Identity.Pull` is set. With the classic store, an image counts as pulled when it has a repo digest. Everything else counts as locally built and is exported. Untagged images are skipped.
 - **`scan`:**
-  - lists images, with registry digests separating pullable images from locally built ones;
-  - lists volumes with sizes, containers, and Compose projects (from `com.docker.compose.project` and working-directory labels);
-  - estimates the export size from volumes plus locally built images only.
-- **`prepare`** requires Docker Desktop running:
-  1. Stops running containers and records them.
-  2. Saves locally built images with `docker image save`.
-  3. Records registry images by name and digest.
-  4. Exports each volume without network or a helper image: `docker import` an empty archive as an image `mtm/empty`; `docker create` a never-started container with the volume mounted; stream `docker cp <container>:/vol -` into the archive. While streaming, computes a content digest: SHA-256 over the sorted (path, mode, size, file SHA-256) entries, so tar ordering does not matter.
-  5. Removes the temporary container and image.
-- **`finish`:**
-  1. If Docker Desktop on the new Mac already has every volume with a matching content digest (Migration Assistant copied `Docker.raw` intact), skips the restore.
-  2. Otherwise loads the image archives and restores each missing or empty volume through the same empty-image container with `docker cp` into the mount. A non-empty volume whose digest does not match is reported as a critical fail and replaced only with `mtm finish --only docker --force` (section 6.2, rule 4).
-  3. Prints `docker pull` commands for registry images for the user to run.
-  4. Starts recorded Compose projects with `docker compose up -d --pull never`.
-- **`verify`:** every volume's content digest matches, every locally built image is present, and every registry image is present or listed as a pending pull. Volume mismatches are critical fails.
+  - lists locally built images (their sizes from `docker image inspect`, which match what `docker image save` writes), pulled images, volumes with sizes (`docker system df --verbose`), running containers, and Compose projects (`com.docker.compose.project`, `.working_dir`, and `.config_files` labels);
+  - estimates the export size from volumes plus locally built images. It is a **blocker** when that size doesn't fit beside the 10 GB reserve on the home volume, with the fix `mtm prepare --stage`.
+  - warns about a container with restart policy `always` that mounts a volume. It restarts whenever Docker starts, so on the new Mac it would change its volume before `finish` checks it. The fix is `docker update --restart unless-stopped <name>`.
+  - warns about volumes it can't export: a driver other than `local`, or driver options such as a bind to a folder.
+- **`prepare`:**
+  - Without Docker Desktop installed, it records "not installed". When Docker Desktop isn't running, a re-run keeps the earlier record with a warning; without one, the module fails with "start Docker Desktop and run `mtm prepare --only docker`".
+  1. Removes leftover temporary containers from an interrupted run (label `dev.mtm.temporary`).
+  2. Checks the whole export fits (section 10) **before** stopping anything.
+  3. Stops running containers one at a time (`docker container stop --time 60`, so databases shut down cleanly) and records them. On a re-run, containers the earlier run stopped stay recorded while they still exist and aren't running. A stop failure is a blocker; the volumes are then recorded without content digests, so `verify` fails them until `prepare` succeeds.
+  4. Exports each volume without network or a helper image:
+     - `docker image import` a 1024-byte empty tar archive as `mtm/empty:1`;
+     - `docker container create --pull never --label dev.mtm.temporary=1 --volume <name>:/vol mtm/empty:1 /mtm-holder`, a never-started container with the volume mounted (Docker needs a command, which never runs);
+     - stream `docker container cp <id>:/vol -` into `docker/volumes/<name>.tar.gz`.
+     - While streaming, it computes a **content digest**: SHA-256 over one line per entry, sorted by path, with the entry's type, permission bits, owner and group ids, size, link target, and content SHA-256. Sorting makes it independent of tar order. The owner is included because a database refuses a data folder it doesn't own. Modification times are left out. A failed volume export is a blocker, and the volume is recorded without a digest.
+  5. Saves each locally built image with `docker image save <tags…>` into `docker/images/<id>.tar`. On a re-run, it keeps the earlier archive when the image id is the same and the archive still matches its fingerprint.
+  6. Records pulled images by id and tags.
+  7. Removes the temporary containers and image.
+  8. Adds a by-hand step: quit Docker Desktop before Migration Assistant, so `Docker.raw` is copied while nothing writes to it.
+- **`prepare --undo`:** starts the containers `prepare` stopped (`docker container start <id>`).
+- **`finish`** requires Docker Desktop running. It refuses to start anything before every volume is settled:
+  1. For each recorded volume, unless `~/.mtm/docker-finish.json` already lists it:
+     - missing: creates it with its recorded labels, then restores it;
+     - present with a matching content digest (Migration Assistant copied `Docker.raw` intact): nothing to do;
+     - present and empty: restores it;
+     - present, non-empty, and different: a **blocker**. `mtm` never overwrites it. It prints the commands that remove the volume and the containers mounting it; after the user runs them, `mtm finish --only docker` restores the volume (section 6.2, rule 4).
+     - Restoring checks the archive's fingerprint first, then streams it with `docker container cp --archive --quiet - <id>:/`. `--archive` keeps owners and modes. It then recomputes the digest, which must match.
+     - Each settled volume is written to `~/.mtm/docker-finish.json` as `intact` or `restored`.
+  2. Loads each missing locally built image from its archive (`docker image load --quiet --input`), after checking its fingerprint.
+  3. Prints one by-hand step: `docker pull <tag>` for each pulled image this Mac lacks. Pulls go by tag: reports mask every `sha256:` value (section 6.3), so a pull by digest couldn't be printed.
+  4. When no blocker remains, starts the containers `prepare` stopped. Those that still exist get `docker container start <id>`. Missing ones are re-created through their Compose project: `docker compose --project-name <p> --project-directory <dir> --file <f>… up --detach --pull never --no-build`. Containers outside Compose that no longer exist become by-hand steps.
+- **`verify`** (a critical check per volume):
+  - Docker Desktop must be installed and running, a critical fail otherwise.
+  - A volume `finish` settled passes, even if containers have changed it since: `finish` compared it before anything ran.
+  - Otherwise the volume's digest is computed now and must match. A missing volume, a mismatch, or a volume recorded without a digest is a critical fail.
+  - Each locally built image must be present by id: a fail otherwise. If only its tag now names a different image, it is info (rebuilt on the new Mac).
+  - Pulled images missing by id and by tag are one warn, listing the `docker pull` commands.
 
 ### 9.6 `databases` (Homebrew Postgres)
-- **`prepare`:** if a `postgresql@N` service is running, writes `pg_dumpall` output (gzip-compressed) to `exports/postgres/` as a safety net, then stops the service cleanly so the copied data directory is consistent.
-- **`finish`:** starts the service. If it fails to start, offers `mtm finish --only databases --restore-dump`, which refuses on a non-empty cluster without `--force`.
-- **`verify`:** the server is running and lists the same databases.
+- **Finding clusters.** A cluster is a folder in `/opt/homebrew/var` whose name starts with `postgres` and that holds a `PG_VERSION` file, such as `postgresql@16`. Its programs are in `/opt/homebrew/opt/postgresql@<major>/bin`. A running server writes its port and socket folder to `postmaster.pid` (lines 4 and 5). It counts as running when `pg_isready` reaches it there.
+- **Connecting.** Every Postgres command connects through that Unix socket (`--host <socket folder> --port <port>`), never over TCP. It passes `-w`, so it never prompts for a password. It unsets `PGHOST`, `PGHOSTADDR`, `PGPORT`, `PGDATABASE`, `PGUSER`, `PGSERVICE`, `PGSERVICEFILE`, and `PGPASSWORD`, and sets `PGPASSFILE=/dev/null`. `psql` also gets `--no-psqlrc`, so a user's `.psqlrc` can't change its output.
+- **Who stops the service.** The `homebrew` module does. It stops the user's running services in `prepare` and starts them in `finish`, Postgres included. `databases` comes before `homebrew` in the module order, so the server is still running when it dumps.
+- **`scan`:** each running cluster is mtm-handled (a safety-net dump), and each stopped one is copied by Migration Assistant. A running cluster without a Unix socket is a warn: `mtm` can't reach it without a network connection.
+- **`prepare`:** for each running cluster:
+  - records the database names (`SELECT datname FROM pg_database WHERE NOT datistemplate`);
+  - checks free space against the sum of `pg_database_size`;
+  - writes `pg_dumpall` output, gzip-compressed, to `postgres/<cluster>.sql.gz` as a safety net. A failed dump is a warn: Migration Assistant still copies the data folder.
+  - On a re-run, a cluster that has stopped since the earlier run keeps that run's record and dump, because its data hasn't changed since. That is how the `homebrew` module leaves it.
+- **`finish`:** nothing, unless `--restore-dump` is given (`mtm finish --only databases --restore-dump`). For each cluster with a dump, it then:
+  - refuses unless the server is running. The fix is `brew postinstall postgresql@<major>` for a missing data folder, then `brew services start`.
+  - refuses on a cluster that has databases other than `postgres`, unless `--force` is also given;
+  - checks the dump's fingerprint, then streams it into `psql --dbname postgres --file=-`.
+- **`verify`** (a critical check per cluster): a cluster that ran at `prepare` must be running and list every recorded database. Its fix is `brew services start`, then `--restore-dump` if it won't start. A cluster that was stopped must have its data folder (`PG_VERSION`).
 - Postgres running inside Docker is covered by the `docker` module.
 
 ### 9.7 `loginitems`
@@ -400,10 +436,14 @@ Otherwise **NOT SAFE TO WIPE**, followed by the blocking items. Exit codes: `0` 
 - **Fail fast, with context.** Every error names the module, the step, the command that failed, its exit code, and the next action. Example: `docker: export failed: Docker Desktop is not running. Start it and run: mtm prepare --only docker`.
 - **Report everything.** `scan` and `verify` run every module and report every problem. One module's error becomes a failed check for that module, not an abort.
 - **Clear readiness.** If any module fails in `prepare`, the run ends with **NOT READY FOR MIGRATION ASSISTANT** and exit code `1`. The modules that succeeded keep their results.
-- **Re-runnable.** Each step records completion and the fingerprints of its inputs in the manifest. A re-run skips completed steps whose inputs are unchanged.
+- **Re-runnable.** Each step records completion and the fingerprints of its inputs in the manifest. A re-run skips completed steps whose inputs are unchanged:
+  - a locally built image archive whose image id and archive fingerprint are unchanged;
+  - a Postgres dump of a cluster that has stopped since;
+  - on the new Mac, a volume `finish` already settled.
+  Volumes and running clusters are exported again, because reading them to check costs as much as exporting them.
 - **Undo for the old Mac.** `prepare --undo` restarts the services and containers `prepare` stopped, for when the user calls off the migration. It runs only on the Mac that ran `prepare`. It removes the undone modules' records, so a later `verify` reports them not prepared rather than trusting a record of a state that no longer holds.
 - **`finish` on the wrong Mac.** `finish` refuses to run on the Mac that ran `prepare`, because it would restart services there. Like `prepare`, it refuses without FileVault.
-- **Free space.** Each export checks free space first and keeps at least 10 GB free. If an export will not fit, `prepare` stops before writing it and suggests `--stage` on an encrypted external volume.
+- **Free space.** Each export checks free space first and keeps at least 10 GB free (10,000,000,000 bytes, the units Finder shows). `docker` checks its whole export before it stops any container, then each archive again before writing it. If an export won't fit, `prepare` stops before writing it and suggests `--stage` on an encrypted external volume.
 - **Migration Assistant problems.** `verify` lists what is missing. `mtm` explains the options: copy the specific missing paths from the old Mac, or erase the new Mac and run Migration Assistant again during first-boot setup.
 - **Wrong Mac.** `prepare` refuses to overwrite a record made on a different Mac (for example, run by mistake on the new Mac after migration) and points to `mtm verify`. `verify` fails when run on the Mac that ran `prepare`. `cleanup` needs a SAFE TO WIPE result from a full `verify` (not one limited with `--only`) on the same Mac, or `--force`.
 - **Version mismatch.** `mtm` refuses to read a manifest with a newer, unknown schema major version, and warns when the `mtm` version differs from the one that ran `prepare`.
@@ -415,7 +455,14 @@ Otherwise **NOT SAFE TO WIPE**, followed by the blocking items. Exit codes: `0` 
 - **Table-driven tests** for the file classification in section 8.4 and the verdict rules in section 8.5.
 - **Integration tests on a temporary home folder** (`HOME` overridden) with real files and real git repos created in a temp directory. They cover unpushed commits, stashes, untracked `.env` files, cloud-only files (simulated with flags where the test can set them), modes, and symlinks.
 - **No-network test** behind the `integration` build tag: runs `mtm scan`, `prepare`, and `verify` on a temporary home folder under a `sandbox-exec` profile that denies network access, including every `brew` and `git` command they invoke, and asserts they succeed.
-- **Docker integration tests** behind the `integration` build tag, run against a real Docker Desktop. They cover: create a volume and an image, export, remove, restore, compare content digests, and the skip-restore path when data is already intact.
+- **Docker integration tests** behind the `integration` build tag, run against a real Docker Desktop. They cover:
+  - create a volume and an image, export, remove, and restore;
+  - compare content digests, including owners and modes;
+  - the skip-restore path when data is already intact;
+  - a non-empty mismatched volume that stays untouched.
+
+  They use only volumes, images, and containers named `mtm-test-…` and call the export and restore steps directly. They never run `prepare`, `finish`, or `undo`, which would stop or start the developer's own containers.
+- **Postgres integration test** behind the same tag, skipped when no Homebrew `postgresql@N` is installed. It works on a throwaway cluster in a temporary folder: `initdb`, then `pg_ctl` with a Unix socket only. It covers dump, drop, `--restore-dump`, and verify.
 - **End-to-end tests in macOS VMs** with Tart, run locally (hosted CI runners cannot run macOS VMs inside them):
   1. Provision a source VM and run `scan` and `prepare`.
   2. Clone the VM to simulate a perfect Migration Assistant copy.
@@ -427,7 +474,7 @@ Otherwise **NOT SAFE TO WIPE**, followed by the blocking items. Exit codes: `0` 
 ## 12. Open questions and risks
 1. **Notarization** needs an Apple Developer Program membership. If none is available, version 1 ships through a Homebrew formula and checksummed release binaries without notarization.
 2. **The macOS 26 "Privacy & Security Settings" checkbox** in Migration Assistant has undocumented scope. If it does migrate privacy permissions, the `permissions` module's verify step marks those checklist items done automatically. The design works either way.
-3. **Whether Migration Assistant copies `Docker.raw` intact** is unconfirmed. The design handles both outcomes (section 9.5).
+3. **Whether Migration Assistant copies `Docker.raw` intact** is unconfirmed. The design handles both outcomes (section 9.5). `Docker.raw` is also a sparse file: on the author's Mac it is 494 GB with 49 GB in use. If Migration Assistant doesn't keep it sparse, the new Mac needs the full size free.
 4. **Google session binding (Device Bound Session Credentials)** comes from a single news source. The design treats re-sign-in as a checklist item, which costs little if it turns out unnecessary.
 5. **System Settings deep links** change between macOS versions. Each link in the catalog table is checked manually on every supported macOS major version before release.
 6. **The volatile-path list** will be incomplete at first. Expect the first real migrations to surface `appstate` warnings that become catalog entries.

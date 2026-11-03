@@ -61,9 +61,10 @@ Found in the final review and its re-review.
 
 ## Stage 3: Docker Desktop and Postgres
 **Goal**: the `docker` module (volume and locally built image export without network or helper images, content digests, skipping the restore when `Docker.raw` arrived intact, `compose up --pull never`) and `databases` (safety-net `pg_dumpall`, clean stop, `--restore-dump`). Adds free-space checks with a 10 GB reserve, `prepare --stage` on an encrypted APFS volume, export fingerprint checks before restore, and skipping steps whose inputs are unchanged on re-run.
-**Success Criteria**: integration tests against a real Docker Desktop export, delete, and restore a volume with a matching digest. A non-empty mismatched volume is never overwritten without `--force`.
+**Success Criteria**: integration tests against a real Docker Desktop export, delete, and restore a volume with a matching digest. A non-empty mismatched volume is never overwritten: `mtm` prints the commands that remove it, and `finish` then restores it.
 **Ordering**: the `databases` module must come before `homebrew` in the module list. Its `pg_dumpall` needs Postgres running, and `homebrew` stops the service during `prepare`.
 **Tests**: `integration`-tagged Docker and Postgres tests; unit tests for the content digest and the free-space and encrypted-volume checks.
+**Plan**: `docs/superpowers/plans/2026-11-02-mtm-stage3-docker-postgres.md`
 **Status**: Not Started
 
 ## Stage 4: Manual steps and `retire`
