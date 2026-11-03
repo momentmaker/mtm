@@ -127,6 +127,35 @@ func TestRetireListsAFolderItCanNoLongerRead(t *testing.T) {
 	}
 }
 
+func TestRetireSkipsAFileUnreadableAtPrepare(t *testing.T) {
+	home := seedHome(t)
+	path := filepath.Join(home, ".zshrc")
+	if err := os.Chmod(path, 0); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.Chmod(path, 0o644) })
+	m := prepareHome(t, home)
+	if changes := retireHome(t, home, m); len(changes) != 0 {
+		t.Errorf("changes = %+v, want none", changes)
+	}
+}
+
+func TestRetireSkipsWhatAFolderUnreadableAtPrepareHolds(t *testing.T) {
+	home := seedHome(t)
+	dir := filepath.Join(home, "Documents")
+	if err := os.Chmod(dir, 0); err != nil {
+		t.Fatal(err)
+	}
+	t.Cleanup(func() { os.Chmod(dir, 0o755) })
+	m := prepareHome(t, home)
+	if err := os.Chmod(dir, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	if changes := retireHome(t, home, m); len(changes) != 0 {
+		t.Errorf("changes = %+v, want none", changes)
+	}
+}
+
 // The record holds Documents/a/x.md before Documents/a.txt, in walk order.
 // Deleting the first must not make mtm lose its place and call the
 // second new.

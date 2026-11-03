@@ -92,10 +92,23 @@ func (m Module) changes(env module.Env, rr *manifest.RecordReader) (*changeTally
 		return nil, err
 	}
 	t := newChangeTally()
+	unseen := ""
 	err := walkHome(env.Ctx, env.Home, excluded, func(it item) error {
 		rec, recorded, err := c.at(it.rel)
 		if err != nil {
 			return err
+		}
+		if unseen != "" && strings.HasPrefix(it.rel, unseen+"/") {
+			return nil
+		}
+		// Prepare already reported what it couldn't read. With no recorded
+		// size or time there is nothing to compare, and nothing inside an
+		// unread folder was recorded.
+		if recorded && rec.Type == manifest.TypeUnreadable {
+			if it.info != nil && it.info.IsDir() {
+				unseen = it.rel
+			}
+			return nil
 		}
 		if m.isVolatile(it.rel) {
 			return nil
