@@ -1,0 +1,13 @@
+id = "bettertouchtool"
+name = "BetterTouchTool"
+bundle_id = "com.hegenberg.BetterTouchTool"
+
+[[permissions]]
+service = "Accessibility"
+
+[[permissions]]
+service = "Input Monitoring"
+
+[license]
+reactivate = true
+note = "Enter your BetterTouchTool license again if it asks."

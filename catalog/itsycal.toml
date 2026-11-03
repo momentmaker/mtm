@@ -1,0 +1,6 @@
+id = "itsycal"
+name = "Itsycal"
+bundle_id = "com.mowglii.ItsycalApp"
+
+[[permissions]]
+service = "Calendars"

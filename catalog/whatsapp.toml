@@ -1,0 +1,5 @@
+id = "whatsapp"
+name = "WhatsApp"
+bundle_id = "net.whatsapp.WhatsApp"
+
+notes = ["Open WhatsApp and check it is still linked; if not, link it again from your phone."]

@@ -1,0 +1,6 @@
+id = "hammerspoon"
+name = "Hammerspoon"
+bundle_id = "org.hammerspoon.Hammerspoon"
+
+[[permissions]]
+service = "Accessibility"

@@ -1,0 +1,7 @@
+id = "signal"
+name = "Signal"
+bundle_id = "org.whispersystems.signal-desktop"
+
+notes = [
+  "Open Signal and check your chats are there. If it asks to be linked again, link the new Mac from your phone (Settings > Linked Devices), then remove the old Mac there.",
+]

@@ -1,0 +1,12 @@
+id = "zoom"
+name = "Zoom"
+bundle_id = "us.zoom.xos"
+
+[[permissions]]
+service = "Camera"
+
+[[permissions]]
+service = "Microphone"
+
+[[permissions]]
+service = "Screen Recording"

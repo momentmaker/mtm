@@ -1,0 +1,7 @@
+id = "tailscale"
+name = "Tailscale"
+bundle_id = "io.tailscale.ipn.macsys"
+
+notes = [
+  "Check that Tailscale is connected. If the new Mac shows up as the old Mac's machine, log out and in again so each Mac has its own node.",
+]

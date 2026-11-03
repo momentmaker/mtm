@@ -1,0 +1,9 @@
+id = "handy"
+name = "Handy"
+bundle_id = "com.pais.handy"
+
+[[permissions]]
+service = "Microphone"
+
+[[permissions]]
+service = "Accessibility"

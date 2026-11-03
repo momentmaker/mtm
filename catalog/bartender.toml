@@ -1,0 +1,13 @@
+id = "bartender"
+name = "Bartender"
+bundle_id = "com.surteesstudios.Bartender"
+
+[[permissions]]
+service = "Accessibility"
+
+[[permissions]]
+service = "Screen Recording"
+
+[license]
+reactivate = true
+note = "Enter your Bartender license again if it asks."

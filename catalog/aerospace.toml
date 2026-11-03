@@ -1,0 +1,6 @@
+id = "aerospace"
+name = "AeroSpace"
+bundle_id = "bobko.aerospace"
+
+[[permissions]]
+service = "Accessibility"

@@ -1,0 +1,13 @@
+id = "cleanshot-x"
+name = "CleanShot X"
+bundle_id = "pl.maketheweb.cleanshotx"
+
+[[permissions]]
+service = "Screen Recording"
+
+[[permissions]]
+service = "Accessibility"
+
+[license]
+reactivate = true
+note = "Activate CleanShot X with your license key; it counts Macs, so remove the old one from your account."

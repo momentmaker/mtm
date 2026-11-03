@@ -1,0 +1,7 @@
+id = "karabiner-elements"
+name = "Karabiner-Elements"
+bundle_id = "org.pqrs.Karabiner-Elements.Settings"
+
+notes = [
+  "Approve Karabiner's driver extension (System Settings > General > Login Items & Extensions > Driver Extensions), and give its core service Input Monitoring when it asks.",
+]

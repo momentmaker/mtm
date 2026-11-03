@@ -1,0 +1,6 @@
+id = "alfred"
+name = "Alfred"
+bundle_id = "com.runningwithcrayons.Alfred"
+
+[[permissions]]
+service = "Accessibility"

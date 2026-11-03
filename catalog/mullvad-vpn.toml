@@ -1,0 +1,5 @@
+id = "mullvad-vpn"
+name = "Mullvad VPN"
+bundle_id = "net.mullvad.vpn"
+
+notes = ["Check that Mullvad VPN connects; if it asks, log in with your account number."]

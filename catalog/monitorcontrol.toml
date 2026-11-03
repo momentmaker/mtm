@@ -1,0 +1,6 @@
+id = "monitorcontrol"
+name = "MonitorControl"
+bundle_id = "app.monitorcontrol.MonitorControl"
+
+[[permissions]]
+service = "Accessibility"

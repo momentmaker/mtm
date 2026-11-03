@@ -1,0 +1,6 @@
+id = "rectangle"
+name = "Rectangle"
+bundle_id = "com.knollsoft.Rectangle"
+
+[[permissions]]
+service = "Accessibility"

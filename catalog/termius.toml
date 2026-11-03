@@ -1,0 +1,5 @@
+id = "termius"
+name = "Termius"
+bundle_id = "com.termius-dmg.mac"
+
+notes = ["Sign in to Termius again if it asks; your hosts and keys sync from your account."]

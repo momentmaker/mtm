@@ -1,0 +1,11 @@
+id = "visual-studio-code"
+name = "Visual Studio Code"
+bundle_id = "com.microsoft.VSCode"
+
+notes = ["If you use Settings Sync, sign in to it again."]
+
+[state]
+volatile = [
+  "~/Library/Application Support/Code/logs/",
+  "~/Library/Application Support/Code/CachedData/",
+]

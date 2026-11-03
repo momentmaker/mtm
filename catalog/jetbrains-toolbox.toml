@@ -1,0 +1,7 @@
+id = "jetbrains-toolbox"
+name = "JetBrains Toolbox"
+bundle_id = "com.jetbrains.toolbox"
+
+[license]
+reactivate = true
+note = "JetBrains licenses belong to your account: sign in again in each IDE if it asks."

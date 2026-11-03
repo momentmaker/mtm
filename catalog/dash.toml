@@ -1,0 +1,7 @@
+id = "dash"
+name = "Dash"
+bundle_id = "com.kapeli.dashdoc"
+
+[license]
+reactivate = true
+note = "Enter your Dash license again if it asks."

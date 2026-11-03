@@ -1,0 +1,8 @@
+id = "slack"
+name = "Slack"
+bundle_id = "com.tinyspeck.slackmacgap"
+
+notes = ["Sign in to your Slack workspaces again if it asks."]
+
+[state]
+volatile = ["~/Library/Application Support/Slack/logs/"]

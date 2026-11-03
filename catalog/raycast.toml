@@ -1,0 +1,6 @@
+id = "raycast"
+name = "Raycast"
+bundle_id = "com.raycast.macos"
+
+[[permissions]]
+service = "Accessibility"
