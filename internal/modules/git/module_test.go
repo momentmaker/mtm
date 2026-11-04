@@ -201,7 +201,10 @@ func TestScanDoesNotAskToPushWork(t *testing.T) {
 		t.Fatal(err)
 	}
 	i := slices.IndexFunc(findings, func(f module.Finding) bool { return f.ID == "local-only:GitHub/app" })
-	if i < 0 || strings.HasPrefix(findings[i].Fix, "Push it") || !strings.Contains(findings[i].Fix, "SAFE TO WIPE") {
+	if i < 0 {
+		t.Fatalf("no local-only:GitHub/app finding in %+v", findings)
+	}
+	if strings.HasPrefix(findings[i].Fix, "Push it") || !strings.Contains(findings[i].Fix, "SAFE TO WIPE") {
 		t.Errorf("fix = %q, want Migration Assistant's copy and verify explained, not a push asked for", findings[i].Fix)
 	}
 }
