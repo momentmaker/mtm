@@ -23,12 +23,18 @@ const (
 	pathMarker     = "__MTM_PATH__="
 	shellTimeout   = 20 * time.Second
 	versionTimeout = 10 * time.Second
+	unknownVersion = "unknown"
 )
 
 type tool struct {
 	name string
 	args []string
 }
+
+// appleToolsDir holds macOS's placeholders for java, python3, and git,
+// which only offer to install the real tool. A variable so tests can stand
+// in for it.
+var appleToolsDir = "/usr/bin"
 
 var known = []tool{
 	{"brew", []string{"--version"}},
@@ -90,7 +96,13 @@ func (m Module) collect(env module.Env) (Inventory, error) {
 		if abs == "" {
 			continue
 		}
-		inv.Tools = append(inv.Tools, Tool{Name: t.name, Path: homeRelative(env.Home, abs), Version: version(env, abs, t.args, path)})
+		v := version(env, abs, t.args, path)
+		if v == unknownVersion && filepath.Dir(abs) == appleToolsDir {
+			// A placeholder that can't report a version is a tool that isn't
+			// installed, not one to require on the new Mac.
+			continue
+		}
+		inv.Tools = append(inv.Tools, Tool{Name: t.name, Path: homeRelative(env.Home, abs), Version: v})
 	}
 	return inv, nil
 }
@@ -156,7 +168,7 @@ func version(env module.Env, abs string, args []string, path string) string {
 	defer cancel()
 	out, err := env.Run.Run(ctx, runner.Command{Name: abs, Args: args, Dir: env.Home, Env: append([]string{"PATH=" + path}, quietHomebrew...)})
 	if err != nil {
-		return "unknown"
+		return unknownVersion
 	}
 	if line := firstLine(out.Stdout); line != "" {
 		return line
@@ -164,7 +176,7 @@ func version(env module.Env, abs string, args []string, path string) string {
 	if line := firstLine(out.Stderr); line != "" {
 		return line
 	}
-	return "unknown"
+	return unknownVersion
 }
 
 func firstLine(b []byte) string {

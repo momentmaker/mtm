@@ -337,6 +337,7 @@ Otherwise **NOT SAFE TO WIPE**, followed by the blocking items. Exit codes: `0` 
     - other shells use `-l -c`.
   - The shell prints the PATH after a marker, so stray output from startup files and a non-zero exit after printing don't matter. The shell has a 20-second timeout.
   - Each tool is then found in that PATH and run directly (`--version`; `go version`; `java -version` on stderr), with a 10-second timeout.
+  - macOS keeps placeholders for `java`, `python3`, and `git` in `/usr/bin` that only offer to install the real tool. One there that fails to report a version counts as not installed, so it isn't recorded or required on the new Mac.
 - Paths inside the home folder are recorded as `~/…`, so they compare across usernames.
 - The global `~/.tool-versions` and `mise` config are dotfiles, which the `files` module already fingerprints.
 - `verify` requires the same paths and versions on the new Mac. A difference, a missing tool, or a login shell that no longer prints a PATH is a fail, with both values shown.

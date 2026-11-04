@@ -190,3 +190,42 @@ func TestScanListsTools(t *testing.T) {
 		t.Errorf("Scan = %+v, %v", findings, err)
 	}
 }
+
+// TestApplePlaceholdersCountAsNotInstalled: macOS's /usr/bin/java with no
+// JDK fails to report a version. That's a tool that isn't installed, so it
+// isn't recorded, while a working tool in the same folder is.
+func TestApplePlaceholdersCountAsNotInstalled(t *testing.T) {
+	f := newFixture(t, "/opt/homebrew/bin/fish")
+	apple := t.TempDir()
+	old := appleToolsDir
+	appleToolsDir = apple
+	t.Cleanup(func() { appleToolsDir = old })
+	for _, name := range []string{"java", "python3"} {
+		testutil.WriteFile(t, filepath.Join(apple, name), "#!/bin/sh\n")
+		os.Chmod(filepath.Join(apple, name), 0o755)
+	}
+	f.fake.Responses[pathCommand("/opt/homebrew/bin/fish").String()] = runner.Response{Stdout: pathMarker + apple + "\n"}
+	f.fake.Responses[filepath.Join(apple, "java")+" -version"] = runner.Response{Code: 1, Stderr: "The operation couldn’t be completed. Unable to locate a Java Runtime.\n"}
+	f.fake.Responses[filepath.Join(apple, "python3")+" --version"] = runner.Response{Stdout: "Python 3.9.6\n"}
+	inv, err := Module{User: "dev"}.collect(f.env(nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if want := []Tool{{Name: "python3", Path: filepath.Join(apple, "python3"), Version: "Python 3.9.6"}}; !slices.Equal(inv.Tools, want) {
+		t.Errorf("tools = %+v, want only python3", inv.Tools)
+	}
+}
+
+// TestAFailingToolOutsideAppleFolderStaysUnknown keeps a real tool that
+// can't report its version, so verify still requires it.
+func TestAFailingToolOutsideAppleFolderStaysUnknown(t *testing.T) {
+	f := newFixture(t, "/opt/homebrew/bin/fish")
+	f.fake.Responses[filepath.Join(f.bin2, "go")+" version"] = runner.Response{Code: 1}
+	inv, err := Module{User: "dev"}.collect(f.env(nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !slices.Contains(inv.Tools, Tool{Name: "go", Path: "~/bin/go", Version: "unknown"}) {
+		t.Errorf("tools = %+v, want go kept as unknown", inv.Tools)
+	}
+}
