@@ -111,6 +111,9 @@ func TestSimulatedMigrationIsSafe(t *testing.T) {
 	prepareOld(t, old)
 	rep := verifyOn(t, migrate(t, old), newUUID, VerifyOptions{})
 	if !rep.Verdict.Safe {
+		for _, c := range rep.Verdict.Blocking {
+			t.Logf("%s: %s %v", c.ID, c.Detail, c.Paths)
+		}
 		t.Fatalf("not safe; blocking: %v", blockingIDs(rep))
 	}
 }

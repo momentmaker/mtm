@@ -32,11 +32,16 @@ func Copy(t *testing.T, src, dst string) {
 }
 
 // IsolateGit makes git ignore the developer's own configuration (signing,
-// hooks, templates) and gives commits a fixed identity.
+// hooks, templates), gives commits a fixed identity, and stops commits from
+// starting background maintenance that could still be writing to the repo
+// when a test records it.
 func IsolateGit(t *testing.T) {
 	t.Helper()
 	t.Setenv("GIT_CONFIG_GLOBAL", "/dev/null")
 	t.Setenv("GIT_CONFIG_NOSYSTEM", "1")
+	t.Setenv("GIT_CONFIG_COUNT", "1")
+	t.Setenv("GIT_CONFIG_KEY_0", "maintenance.auto")
+	t.Setenv("GIT_CONFIG_VALUE_0", "false")
 	t.Setenv("GIT_AUTHOR_NAME", "mtm test")
 	t.Setenv("GIT_AUTHOR_EMAIL", "test@example.com")
 	t.Setenv("GIT_COMMITTER_NAME", "mtm test")
