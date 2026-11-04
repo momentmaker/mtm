@@ -193,26 +193,35 @@ func TestScanListsTools(t *testing.T) {
 
 // TestApplePlaceholdersCountAsNotInstalled: macOS's /usr/bin/java with no
 // JDK fails to report a version. That's a tool that isn't installed, so it
-// isn't recorded, while a working tool in the same folder is.
+// isn't recorded, while a working tool in the same folder is. Only the
+// three placeholders are dropped: a real Apple tool such as ruby that
+// fails to report stays, as unknown.
 func TestApplePlaceholdersCountAsNotInstalled(t *testing.T) {
 	f := newFixture(t, "/opt/homebrew/bin/fish")
 	apple := t.TempDir()
 	old := appleToolsDir
 	appleToolsDir = apple
 	t.Cleanup(func() { appleToolsDir = old })
-	for _, name := range []string{"java", "python3"} {
+	for _, name := range []string{"java", "python3", "ruby"} {
 		testutil.WriteFile(t, filepath.Join(apple, name), "#!/bin/sh\n")
-		os.Chmod(filepath.Join(apple, name), 0o755)
+		if err := os.Chmod(filepath.Join(apple, name), 0o755); err != nil {
+			t.Fatal(err)
+		}
 	}
 	f.fake.Responses[pathCommand("/opt/homebrew/bin/fish").String()] = runner.Response{Stdout: pathMarker + apple + "\n"}
 	f.fake.Responses[filepath.Join(apple, "java")+" -version"] = runner.Response{Code: 1, Stderr: "The operation couldn’t be completed. Unable to locate a Java Runtime.\n"}
 	f.fake.Responses[filepath.Join(apple, "python3")+" --version"] = runner.Response{Stdout: "Python 3.9.6\n"}
+	f.fake.Responses[filepath.Join(apple, "ruby")+" --version"] = runner.Response{Code: 1}
 	inv, err := Module{User: "dev"}.collect(f.env(nil))
 	if err != nil {
 		t.Fatal(err)
 	}
-	if want := []Tool{{Name: "python3", Path: filepath.Join(apple, "python3"), Version: "Python 3.9.6"}}; !slices.Equal(inv.Tools, want) {
-		t.Errorf("tools = %+v, want only python3", inv.Tools)
+	want := []Tool{
+		{Name: "python3", Path: filepath.Join(apple, "python3"), Version: "Python 3.9.6"},
+		{Name: "ruby", Path: filepath.Join(apple, "ruby"), Version: "unknown"},
+	}
+	if !slices.Equal(inv.Tools, want) {
+		t.Errorf("tools = %+v, want python3 and ruby (unknown) only", inv.Tools)
 	}
 }
 

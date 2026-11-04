@@ -36,6 +36,11 @@ type tool struct {
 // in for it.
 var appleToolsDir = "/usr/bin"
 
+// applePlaceholders are the only tools in appleToolsDir that are stand-ins.
+// Other tools there, such as ruby, are real, so a failed version stays
+// "unknown" and verify still requires them.
+var applePlaceholders = map[string]bool{"java": true, "python3": true, "git": true}
+
 var known = []tool{
 	{"brew", []string{"--version"}},
 	{"git", []string{"--version"}},
@@ -97,7 +102,7 @@ func (m Module) collect(env module.Env) (Inventory, error) {
 			continue
 		}
 		v := version(env, abs, t.args, path)
-		if v == unknownVersion && filepath.Dir(abs) == appleToolsDir {
+		if v == unknownVersion && applePlaceholders[t.name] && filepath.Dir(abs) == appleToolsDir {
 			// A placeholder that can't report a version is a tool that isn't
 			// installed, not one to require on the new Mac.
 			continue
@@ -162,7 +167,8 @@ func lookPath(name, path string) string {
 
 // version runs the tool with the login shell's PATH, so shims such as
 // asdf's find their real tools. A tool that fails to report reads
-// "unknown", which verify compares like any other version.
+// "unknown", which verify compares like any other version; collect drops
+// the Apple placeholders from that rule.
 func version(env module.Env, abs string, args []string, path string) string {
 	ctx, cancel := context.WithTimeout(env.Ctx, versionTimeout)
 	defer cancel()
