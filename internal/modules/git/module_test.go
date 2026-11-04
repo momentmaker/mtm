@@ -96,6 +96,11 @@ func TestDiscoverFindsReposAndSkipsNoise(t *testing.T) {
 		"Library/Application Support/x/.git",
 		".cargo/registry/index/x/.git",
 		".asdf/plugins/nodejs/.git",
+		".nvm/.git",
+		".pyenv/.git",
+		".rbenv/.git",
+		".tmux/plugins/tpm/.git",
+		".vim/plugged/x/.git",
 		".claude/plugins/cache/x/1.0.0/.git",
 		".oh-my-zsh/.git",
 		".local/share/nvim/lazy/x/.git",
@@ -245,6 +250,49 @@ func TestScanGroupsReposWhoseOnlyWorkIsSecretFiles(t *testing.T) {
 	}
 	if !slices.ContainsFunc(findings, func(f module.Finding) bool { return f.ID == "local-only:GitHub/app" }) {
 		t.Error("the repo with unpushed work lost its own warning")
+	}
+}
+
+func TestScanKeepsAWarningForAnyRealLocalWork(t *testing.T) {
+	const rel = "GitHub/api"
+	cases := []struct {
+		name string
+		add  func(t *testing.T, repo string)
+	}{
+		{"unpushed commit", func(t *testing.T, repo string) {
+			testutil.WriteFile(t, filepath.Join(repo, "new.txt"), "x\n")
+			testutil.Git(t, repo, "add", "new.txt")
+			testutil.Git(t, repo, "commit", "-q", "-m", "local")
+		}},
+		{"stash", func(t *testing.T, repo string) {
+			testutil.WriteFile(t, filepath.Join(repo, ".gitignore"), ".env\n# edited\n")
+			testutil.Git(t, repo, "stash", "push", "-q")
+		}},
+		{"tracked file edit", func(t *testing.T, repo string) {
+			testutil.WriteFile(t, filepath.Join(repo, ".gitignore"), ".env\n# edited\n")
+		}},
+		{"untracked file", func(t *testing.T, repo string) {
+			testutil.WriteFile(t, filepath.Join(repo, "notes.txt"), "x\n")
+		}},
+	}
+	for _, c := range cases {
+		t.Run(c.name, func(t *testing.T) {
+			home := t.TempDir()
+			pushedRepoWithSecret(t, home, rel)
+			c.add(t, filepath.Join(home, rel))
+			findings, err := New().Scan(testEnv(home, nil))
+			if err != nil {
+				t.Fatal(err)
+			}
+			if !slices.ContainsFunc(findings, func(f module.Finding) bool { return f.ID == "local-only:"+rel }) {
+				t.Errorf("findings = %+v, want its own local-only warning", findings)
+			}
+			if slices.ContainsFunc(findings, func(f module.Finding) bool {
+				return f.ID == "secret-files" && strings.Contains(f.Detail, "~/"+rel)
+			}) {
+				t.Errorf("findings = %+v, want it out of the secret-files line", findings)
+			}
+		})
 	}
 }
 
