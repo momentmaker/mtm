@@ -162,7 +162,28 @@ Found while planning.
 - **Touch ID's count** comes from `bioutil`'s text output. If the format changes, the count is unknown and the step is listed anyway.
 
 ## Stage 5: Ship
-**Goal**: GitHub Actions CI on Apple Silicon (`go test`, `go vet`, `gofmt`, `govulncheck`, catalog validation); end-to-end tests in Tart VMs (cloned VM as a perfect migration, injected faults); release builds with checksums and provenance attestations; a Homebrew tap; README and contributor guide (including how to add a catalog app).
-**Success Criteria**: tagging a release produces checksummed binaries and a working `brew install`. The Tart end-to-end suite passes locally.
-**Tests**: the Tart suite; a release dry run.
+Stage 5 is built in two parts. The first ships everything but the first release. The second runs on the new Mac after the author's own migration, which is mtm's first real-world run. This Mac has too little free disk for Tart's macOS VM images.
+
+### Stage 5, Part 1: CI, release pipeline, and docs
+**Goal**:
+- `LICENSE` (MIT), `README.md`, `CONTRIBUTING.md` (including how to add a catalog app), and `SECURITY.md`;
+- GitHub Actions CI on `macos-26` (`gofmt`, `go vet`, `go test -race`, `govulncheck`, catalog validation);
+- the GoReleaser release pipeline: `darwin/arm64`, checksums, provenance attestations, and a formula in `momentmaker/homebrew-tap`;
+- a snapshot release dry run in CI.
+
+Nothing is tagged or released.
+
+**Success Criteria**: CI passes on GitHub for a push. The snapshot dry run builds the `darwin_arm64` archive, `checksums.txt`, and a formula, and the built binary reports its version.
+**Tests**: `TestReadmeShowsTheCurrentUsage`; the CI run on GitHub, including the dry run.
+**Plan**: `docs/superpowers/plans/2026-11-03-mtm-stage5-part1-ci-release-docs.md`
+**Status**: In Progress
+
+### Stage 5, Part 2: Real migration, end-to-end suite, and first release
+**Goal**:
+- the author's own migration to the new Mac with mtm, which settles the "Real-run validation pending" items above;
+- the Tart end-to-end suite: a cloned VM as a perfect migration, with injected faults;
+- the `HOMEBREW_TAP_TOKEN` secret, the `v0.1.0` tag, and a working `brew install momentmaker/tap/mtm`.
+
+**Success Criteria**: tagging a release produces checksummed, attested binaries and a working `brew install`. The Tart end-to-end suite passes locally.
+**Tests**: the Tart suite; the release itself.
 **Status**: Not Started

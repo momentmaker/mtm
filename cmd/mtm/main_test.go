@@ -43,6 +43,18 @@ func TestVersion(t *testing.T) {
 	}
 }
 
+// TestReadmeShowsTheCurrentUsage keeps the README's usage block the same as
+// mtm help, so the first thing a new user reads matches the tool.
+func TestReadmeShowsTheCurrentUsage(t *testing.T) {
+	data, err := os.ReadFile("../../README.md")
+	if err != nil {
+		t.Fatal(err)
+	}
+	if !strings.Contains(string(data), "```text\n"+usage+"```") {
+		t.Error("README.md's usage block differs from mtm help; copy the usage text from cmd/mtm/main.go")
+	}
+}
+
 func TestNoArgsShowsUsage(t *testing.T) {
 	var out, errOut bytes.Buffer
 	if code := run(ctx, nil, &out, &errOut, noApp(t)); code != exitFailed || !strings.Contains(errOut.String(), "Usage:") {
