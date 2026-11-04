@@ -176,7 +176,7 @@ Nothing is tagged or released.
 **Success Criteria**: CI passes on GitHub for a push. The snapshot dry run builds the `darwin_arm64` archive, `checksums.txt`, and a formula, and the built binary reports its version.
 **Tests**: `TestReadmeShowsTheCurrentUsage`; the CI run on GitHub, including the dry run.
 **Plan**: `docs/superpowers/plans/2026-11-03-mtm-stage5-part1-ci-release-docs.md`
-**Status**: In Progress
+**Status**: Complete
 
 #### Known gaps carried out of Stage 5, Part 1
 Found while planning.
@@ -185,13 +185,14 @@ Found while planning.
   - A cask for an un-notarized binary needs its quarantine flag removed, which mtm won't do.
   - If GoReleaser removes `brews`, the formula must be written another way.
 - **The author's Go toolchain:** Go 1.26.1 has GO-2026-4869 (`archive/tar`), so `govulncheck` fails on it until Go is upgraded to 1.26.2 or later. CI and releases take the newest 1.26 patch.
-- **Release hardening waits for the first release (Part 2):** move the release workflow's permissions to the job, keep `HOMEBREW_TAP_TOKEN` in an environment limited to `v*` tags, and note that the provenance attestation runs after GoReleaser publishes, so a failed attestation needs the job re-run.
+- **Release hardening waits for the first release (Part 2):** move the release workflow's permissions to the job; keep `HOMEBREW_TAP_TOKEN` in an environment limited to `v*` tags, as a fine-grained token that can write only `momentmaker/homebrew-tap`'s contents; check GoReleaser's download by its cosign signature, not only its checksum; and run gofmt, vet, and govulncheck in the release job too.
 
 ### Stage 5, Part 2: Real migration, end-to-end suite, and first release
 **Goal**:
 - the author's own migration to the new Mac with mtm, which settles the "Real-run validation pending" items above;
 - the Tart end-to-end suite: a cloned VM as a perfect migration, with injected faults;
-- the `HOMEBREW_TAP_TOKEN` secret, the `v0.1.0` tag, and a working `brew install momentmaker/tap/mtm`.
+- the `HOMEBREW_TAP_TOKEN` secret, the `v0.1.0` tag, and a working `brew install momentmaker/tap/mtm`;
+- before the tag: update README.md's status note and "Once released" wording; add the `go install` version fallback (`debug.ReadBuildInfo`), so a source build reports its version and not `dev`; and check private vulnerability reporting is still on.
 
 **Success Criteria**: tagging a release produces checksummed, attested binaries and a working `brew install`. The Tart end-to-end suite passes locally.
 **Tests**: the Tart suite; the release itself.

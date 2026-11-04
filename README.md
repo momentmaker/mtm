@@ -79,7 +79,7 @@ Usage:
 ## What it checks
 
 - **Files:** your home folder, with a fingerprint for each dotfile at its top and everything in `~/.ssh`, `~/.gnupg`, and `~/.config`. Cloud-only files are never opened.
-- **Git:** every repo's commits, stashes, and untracked and ignored secret-like files.
+- **Git:** every repo's commits and stashes, its untracked files, and ignored files that look like secrets (`.env*`, `*.pem`, `*.key`, …).
 - **Homebrew and toolchains:** your Homebrew services, and the paths and versions of your tools.
 - **Docker Desktop:** your volumes and locally built images.
 - **Postgres:** Homebrew Postgres, with a safety-net dump.

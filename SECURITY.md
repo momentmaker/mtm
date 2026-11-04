@@ -4,14 +4,14 @@
 
 mtm runs as you, on the Mac you're about to erase and on its replacement.
 - **What it reads:** your home folder; a fingerprint of important files; the presence of keychain items (never their contents); and, with Full Disk Access, the privacy permissions databases.
-- **What it runs:** your Homebrew, Docker Desktop, git, and Postgres tools, and macOS's own command-line tools (listed in section 7.1 of the design).
+- **What it runs:** your Homebrew, Docker Desktop, git, Postgres, and gpg tools; your login shell, once, as an interactive login shell to read your `PATH`, so your shell's startup files run; each developer tool on that `PATH` with `--version`; and macOS's own command-line tools (section 7.1 of the design lists them), including `osascript` to list your login items.
 - **What it writes:** `prepare` writes only inside `~/.mtm`, or the `--stage` folder you give it; those hold your Docker volume exports and Postgres dumps, which can contain sensitive data. `finish` restores those exports into Docker on the new Mac, and loads the Postgres dump only if you ask with `--restore-dump`.
 
 The rules it follows are in section 6 of the [design](docs/superpowers/specs/2026-11-02-mtm-design.md):
 - no network connections;
 - no secret contents read;
 - no security setting weakened;
-- no user data deleted or overwritten;
+- no user data deleted or overwritten, unless you pass `--force` to `finish --restore-dump` or `cleanup`;
 - `~/.mtm` private and excluded from Time Machine.
 
 A way to break any of these is a vulnerability.
