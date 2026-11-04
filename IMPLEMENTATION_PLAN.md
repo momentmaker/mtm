@@ -185,6 +185,7 @@ Found while planning.
   - A cask for an un-notarized binary needs its quarantine flag removed, which mtm won't do.
   - If GoReleaser removes `brews`, the formula must be written another way.
 - **The author's Go toolchain:** Go 1.26.1 has GO-2026-4869 (`archive/tar`), so `govulncheck` fails on it until Go is upgraded to 1.26.2 or later. CI and releases take the newest 1.26 patch.
+- **Release hardening waits for the first release (Part 2):** move the release workflow's permissions to the job, keep `HOMEBREW_TAP_TOKEN` in an environment limited to `v*` tags, and note that the provenance attestation runs after GoReleaser publishes, so a failed attestation needs the job re-run.
 
 ### Stage 5, Part 2: Real migration, end-to-end suite, and first release
 **Goal**:

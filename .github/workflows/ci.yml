@@ -63,8 +63,7 @@ jobs:
           check-latest: true
 
       # A snapshot builds everything a release would and publishes nothing.
-      # The tap token is never used, but the config names it, so it must
-      # be set.
+      # The tap token is empty: a snapshot never publishes.
       - uses: goreleaser/goreleaser-action@a4f02ab5355a589de60d917a659ce617ed19b3de # v7.3.0
         with:
           distribution: goreleaser
@@ -93,3 +92,19 @@ jobs:
           cat "$formula"
           grep -q 'depends_on arch: :arm64' "$formula"
           grep -q 'depends_on macos: :tahoe' "$formula"
+
+      - name: Keep the first checksums and change the files' times
+        run: |
+          cp dist/checksums.txt "$RUNNER_TEMP/first-checksums.txt"
+          touch LICENSE README.md
+
+      - uses: goreleaser/goreleaser-action@a4f02ab5355a589de60d917a659ce617ed19b3de # v7.3.0
+        with:
+          distribution: goreleaser
+          version: v2.19.0
+          args: release --snapshot --clean
+        env:
+          HOMEBREW_TAP_TOKEN: ""
+
+      - name: The archive is the same when built again
+        run: diff "$RUNNER_TEMP/first-checksums.txt" dist/checksums.txt

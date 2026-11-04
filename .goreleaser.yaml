@@ -25,17 +25,35 @@ builds:
       - -trimpath
     ldflags:
       - -s -w -X main.version={{ .Version }}
-    # The commit's time, not the build's, so a rebuild of the same commit
-    # with the same Go version gives the same archive.
+    # The commit's time, not the build's. With the archive's file info below,
+    # a rebuild of the same commit with the same Go version gives the same
+    # archive.
     mod_timestamp: "{{ .CommitTimestamp }}"
 
 archives:
   - id: mtm
     formats: [tar.gz]
     name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    # Owner, group, mode and time are pinned, so the archive doesn't depend
+    # on the build machine or the checkout's file times.
+    builds_info:
+      owner: root
+      group: root
+      mode: 0755
+      mtime: "{{ .CommitDate }}"
     files:
-      - LICENSE
-      - README.md
+      - src: LICENSE
+        info:
+          owner: root
+          group: root
+          mode: 0644
+          mtime: "{{ .CommitDate }}"
+      - src: README.md
+        info:
+          owner: root
+          group: root
+          mode: 0644
+          mtime: "{{ .CommitDate }}"
 
 checksum:
   name_template: checksums.txt
@@ -74,7 +92,9 @@ brews:
       name: homebrew-tap
       token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
     homepage: https://github.com/momentmaker/mtm
-    description: "Move a developer's Mac to a new Mac alongside Migration Assistant, and prove nothing was lost"
+    description: "Move a developer's Mac to a new Mac and prove nothing was lost"
+    # A prerelease tag such as v0.1.0-rc.1 doesn't update the tap's formula.
+    skip_upload: auto
     license: MIT
     custom_block: |
       depends_on arch: :arm64

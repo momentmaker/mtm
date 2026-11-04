@@ -27,6 +27,8 @@ jobs:
         with:
           go-version-file: go.mod
           check-latest: true
+          # A release must not restore a cache another run wrote.
+          cache: false
 
       - name: go test
         run: go test -race ./...

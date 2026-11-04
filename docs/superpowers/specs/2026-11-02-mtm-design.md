@@ -529,7 +529,7 @@ Identities are recorded, never key material.
 - **CI** (GitHub Actions, `macos-26` Apple Silicon runners), on every push and pull request:
   - the `gofmt` check, `go vet` with and without the `integration` tag, `go test -race ./...` (which includes catalog validation), and `govulncheck`;
   - a GoReleaser snapshot build, whose binary must report its snapshot version, and whose formula must require Apple Silicon and macOS 26.
-  - The integration tests skip themselves on CI runners, which have no FileVault, Docker Desktop, or Homebrew Postgres.
+  - CI doesn't run the `integration`-tagged tests: they need FileVault, Docker Desktop, or Homebrew Postgres, which CI runners don't have.
 
 ## 12. Open questions and risks
 1. **Notarization** needs an Apple Developer Program membership. Version 1 ships without it, through a Homebrew formula and checksummed, attested release binaries (section 6.6).
