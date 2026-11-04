@@ -41,6 +41,16 @@ var volatile = pathset.MustNew(
 	".bun/install/cache/",
 )
 
+// isGitLock reports git's own lock files: <name>.lock inside a .git folder.
+// Git creates one around every write and removes it moments later, so one
+// the walk catches is usually gone before the copy. A base-name pattern
+// would also forgive a missing Cargo.lock or yarn.lock, which are project
+// files.
+func isGitLock(rel string) bool {
+	inGitDir := strings.HasPrefix(rel, ".git/") || strings.Contains(rel, "/.git/")
+	return inGitDir && strings.HasSuffix(rel, ".lock")
+}
+
 var fingerprinted = pathset.MustNew(".ssh/", ".gnupg/", ".config/")
 
 func area(rel string) string {

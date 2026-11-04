@@ -85,3 +85,33 @@ func TestExcludedAndVolatile(t *testing.T) {
 		}
 	}
 }
+
+func TestMissingGitLockIsVolatile(t *testing.T) {
+	m := New()
+	for _, rel := range []string{
+		"GitHub/app/.git/index.lock",
+		"GitHub/app/.git/objects/maintenance.lock",
+		"GitHub/app/.git/refs/heads/main.lock",
+		".git/index.lock",
+	} {
+		rec := manifest.Entry{Path: rel, Type: manifest.TypeFile, Area: manifest.AreaCritical}
+		if got := Classify(rec, Observed{}, 0, m.isVolatile); got != MissingVolatile {
+			t.Errorf("Classify(%q) = %v, want MissingVolatile", rel, got)
+		}
+	}
+}
+
+func TestMissingProjectLockfileStaysCritical(t *testing.T) {
+	m := New()
+	for _, rel := range []string{
+		"GitHub/app/Cargo.lock",
+		"GitHub/app/yarn.lock",
+		"GitHub/app/.github/Cargo.lock",
+		"GitHub/app/.git/config",
+	} {
+		rec := manifest.Entry{Path: rel, Type: manifest.TypeFile, Area: manifest.AreaCritical}
+		if got := Classify(rec, Observed{}, 0, m.isVolatile); got != MissingCritical {
+			t.Errorf("Classify(%q) = %v, want MissingCritical", rel, got)
+		}
+	}
+}

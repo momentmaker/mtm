@@ -282,6 +282,7 @@ Otherwise **NOT SAFE TO WIPE**, followed by the blocking items. Exit codes: `0` 
 - `verify` walks the same roots on the new Mac and applies section 8.4.
 - `retire` walks the old Mac's home folder again alongside the record, which is in the same walk order, so memory stays bounded. It lists files that differ from the record in type, size, time, or link target, and files the record doesn't have, even with an old time, as a copy from a drive keeps. Groups are those of section 8.4. Changes outside `~/Library` are warnings, those inside it info. Deleted files, folders, cloud-only files, volatile paths, and paths `prepare` couldn't read, with everything inside such a folder, aren't listed: there is nothing to compare them with. The same goes for a folder that was cloud-only or on another volume at `prepare`. A path that can no longer be read is listed.
 - Fingerprinting streams with a bounded worker pool.
+- Git's own lock files (`<name>.lock` inside a `.git` folder) are volatile: git creates one around each write and removes it moments later, so one the walk catches is usually gone before the copy.
 
 ### 9.2 `git`
 - **Finding repos:** `.git` directories under the home folder, excluding `~/Library` and `node_modules`. Search depth is configurable.

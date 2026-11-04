@@ -29,7 +29,7 @@ type Module struct {
 func New(volatile ...string) Module { return Module{extraVolatile: pathset.MustNew(volatile...)} }
 
 func (m Module) isVolatile(rel string) bool {
-	return volatile.Match(rel) || m.extraVolatile.Match(rel)
+	return volatile.Match(rel) || m.extraVolatile.Match(rel) || isGitLock(rel)
 }
 
 func (Module) Name() string { return Name }

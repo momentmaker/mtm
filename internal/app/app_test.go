@@ -118,6 +118,25 @@ func TestSimulatedMigrationIsSafe(t *testing.T) {
 	}
 }
 
+// Git creates a lock file around each write and removes it moments later, so
+// a walk can record one that is gone before the copy.
+func TestGitLockCaughtDuringPrepareStaysSafe(t *testing.T) {
+	old := seedHome(t)
+	testutil.WriteFile(t, filepath.Join(old, "GitHub/app/.git/index.lock"), "")
+	prepareOld(t, old)
+	newHome := migrate(t, old)
+	if err := os.Remove(filepath.Join(newHome, "GitHub/app/.git/index.lock")); err != nil {
+		t.Fatal(err)
+	}
+	rep := verifyOn(t, newHome, newUUID, VerifyOptions{})
+	if !rep.Verdict.Safe {
+		for _, c := range rep.Verdict.Blocking {
+			t.Logf("%s: %s %v", c.ID, c.Detail, c.Paths)
+		}
+		t.Errorf("not safe; blocking: %v", blockingIDs(rep))
+	}
+}
+
 func TestVerifyCatchesFaults(t *testing.T) {
 	tests := []struct {
 		name   string
