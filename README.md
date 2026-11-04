@@ -84,9 +84,9 @@ Usage:
 - **Docker Desktop:** your volumes and locally built images.
 - **Postgres:** Homebrew Postgres, with a safety-net dump.
 - **Login items and privacy permissions:** your launch agents, login items, and privacy permissions.
-- **Browsers:** Chrome, Brave, Arc, Firefox, and Safari profiles, and each Chromium browser's keychain key.
+- **Browsers:** Chrome, Brave, Arc, and Firefox profiles and extensions, and whether each Chromium browser's Safe Storage keychain item is there. For Safari, only whether its data could be read.
 - **Identities:** your SSH and GPG identities.
-- **Apps:** your apps, your login shell, and the `/etc` files you've edited.
+- **Apps:** your apps, your login shell, and the `/etc` files developers commonly edit: `hosts`, `shells`, `paths.d`, and `pam.d/sudo_local`.
 
 The app catalog in [`catalog/`](catalog/README.md) says what each app needs by hand on a new Mac.
 
