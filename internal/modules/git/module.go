@@ -41,6 +41,7 @@ func (m Module) Scan(env module.Env) ([]module.Finding, error) {
 		Title:    words.Count(len(repos), "git repository", "git repositories") + " found",
 		Detail:   "Migration Assistant copies them. mtm checks that every recorded commit and untracked file arrived.",
 	}}
+	var secretsOnly []string
 	for _, rel := range repos {
 		if err := env.Ctx.Err(); err != nil {
 			return nil, err
@@ -63,7 +64,9 @@ func (m Module) Scan(env module.Env) ([]module.Finding, error) {
 		if r.tooManyToFingerprint() {
 			findings = append(findings, tooManyFiles(r))
 		}
-		if risks := r.risks(); len(risks) > 0 {
+		if r.onlySecrets() {
+			secretsOnly = append(secretsOnly, fmt.Sprintf("%s (%d)", displayPath(rel), len(r.Important)))
+		} else if risks := r.risks(); len(risks) > 0 {
 			findings = append(findings, module.Finding{
 				Module:   Name,
 				ID:       "local-only:" + rel,
@@ -71,11 +74,32 @@ func (m Module) Scan(env module.Env) ([]module.Finding, error) {
 				Handler:  module.ByMigrationAssistant,
 				Title:    displayPath(rel) + ": work that exists only on this Mac",
 				Detail:   strings.Join(risks, ", "),
-				Fix:      "Push it if you can. Either way, don't wipe this Mac until mtm verify says SAFE TO WIPE.",
+				Fix:      localOnlyFix,
 			})
 		}
 	}
+	if len(secretsOnly) > 0 {
+		findings = append(findings, secretFiles(secretsOnly))
+	}
 	return findings, nil
+}
+
+// localOnlyFix doesn't ask for a push: Migration Assistant copies the work
+// and verify checks it, so what matters is keeping this Mac until then.
+const localOnlyFix = "Migration Assistant copies it, and mtm verify checks every commit and file arrived. Until then this Mac has the only copy: push it first if you want another, and don't erase this Mac before mtm verify says SAFE TO WIPE."
+
+// secretFiles gathers the repos whose only local work is ignored files
+// that look like secrets, such as .env files. They belong outside git, so
+// one line says they're copied and checked, instead of a warning per repo.
+func secretFiles(repos []string) module.Finding {
+	return module.Finding{
+		Module:   Name,
+		ID:       "secret-files",
+		Severity: module.SeverityInfo,
+		Handler:  module.ByMigrationAssistant,
+		Title:    words.Count(len(repos), "repo has", "repos have") + " ignored files that look like secrets or local config",
+		Detail:   "Migration Assistant copies them, and mtm verify checks each one arrived: " + strings.Join(repos, ", "),
+	}
 }
 
 func (m Module) Prepare(env module.Env, _ *stage.Stage) (module.Result, error) {

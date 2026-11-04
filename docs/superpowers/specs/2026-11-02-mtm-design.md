@@ -285,7 +285,7 @@ Otherwise **NOT SAFE TO WIPE**, followed by the blocking items. Exit codes: `0` 
 - Git's own lock files (`<name>.lock` inside a `.git` folder) are volatile: git creates one around each write and removes it moments later, so one the walk catches is usually gone before the copy.
 
 ### 9.2 `git`
-- **Finding repos:** `.git` directories under the home folder, excluding `~/Library` and `node_modules`. Search depth is configurable.
+- **Finding repos:** `.git` directories under the home folder, excluding `~/Library`, `node_modules`, package-manager caches, and the clones that tools keep and download again: version managers (`~/.asdf`, `~/.nvm`, `~/.pyenv`, `~/.rbenv`), shell and editor plugin managers (`~/.oh-my-zsh`, `~/.tmux/plugins`, `~/.vim/plugged`, `~/.local/share/nvim`), and agent plugins (`~/.claude/plugins`). The files module still records and checks the files in them. Search depth is configurable.
 - **Every git command** runs with `--no-optional-locks` and `-c core.fsmonitor=false`, so `mtm` never rewrites a repo's index or starts background daemons.
 - **Recorded per repo:**
   - local refs with commit hashes (`git for-each-ref`). Remote-tracking refs are skipped, because their commits exist on the remote;
@@ -294,7 +294,8 @@ Otherwise **NOT SAFE TO WIPE**, followed by the blocking items. Exit codes: `0` 
   - status (`git status --porcelain=v2 --branch -z --untracked-files=all --ignored=matching`; NUL-separated, so any file name parses);
   - the number of commits not on any remote (`git rev-list --count --branches --not --remotes`). This also covers local branches without an upstream;
   - fingerprints and modification times of untracked files, and of ignored files matching the important-file patterns (`.env*`, `*.pem`, `*.key`, `*.p12`, `*.local.*`).
-- **`scan`:** unpushed commits, stashes, untracked files, and important ignored files are warnings. Migration Assistant copies them, but they exist nowhere else once the old Mac is wiped.
+- **`scan`:** unpushed commits, stashes, uncommitted changes, and untracked files are a warning per repo. Migration Assistant copies them and verify checks them, but until then they exist nowhere else, so the old Mac must not be erased before SAFE TO WIPE. mtm doesn't ask for a push.
+  - Repos whose only local work is important ignored files, such as `.env` files, which belong outside git, get one info line between them, naming each repo.
 - **`verify`** (a critical check per repo) fails when:
   - the repo is missing or unreadable;
   - any recorded commit (refs, HEAD, stash) is missing from the object database (`git cat-file --batch-check`);

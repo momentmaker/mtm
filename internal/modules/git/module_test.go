@@ -95,6 +95,10 @@ func TestDiscoverFindsReposAndSkipsNoise(t *testing.T) {
 		"GitHub/app/node_modules/pkg/.git",
 		"Library/Application Support/x/.git",
 		".cargo/registry/index/x/.git",
+		".asdf/plugins/nodejs/.git",
+		".claude/plugins/cache/x/1.0.0/.git",
+		".oh-my-zsh/.git",
+		".local/share/nvim/lazy/x/.git",
 		"deep/1/2/3/4/5/.git",
 		"deep/1/2/3/4/5/6/.git",
 	} {
@@ -181,6 +185,66 @@ func TestScanWarnsAboutLocalOnlyWork(t *testing.T) {
 		if !strings.Contains(findings[i].Detail, want) {
 			t.Errorf("detail %q missing %q", findings[i].Detail, want)
 		}
+	}
+}
+
+func TestScanDoesNotAskToPushWork(t *testing.T) {
+	home := t.TempDir()
+	seedRepo(t, home)
+	findings, err := New().Scan(testEnv(home, nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	i := slices.IndexFunc(findings, func(f module.Finding) bool { return f.ID == "local-only:GitHub/app" })
+	if i < 0 || strings.HasPrefix(findings[i].Fix, "Push it") || !strings.Contains(findings[i].Fix, "SAFE TO WIPE") {
+		t.Errorf("fix = %q, want Migration Assistant's copy and verify explained, not a push asked for", findings[i].Fix)
+	}
+}
+
+// pushedRepoWithSecret makes a repo at rel whose commits are all on its
+// remote, and whose only work of its own is an ignored .env file.
+func pushedRepoWithSecret(t *testing.T, home, rel string) {
+	t.Helper()
+	testutil.IsolateGit(t)
+	remote := filepath.Join(t.TempDir(), "remote.git")
+	testutil.Git(t, t.TempDir(), "init", "-q", "--bare", remote)
+	repo := filepath.Join(home, rel)
+	if err := os.MkdirAll(repo, 0o755); err != nil {
+		t.Fatal(err)
+	}
+	testutil.Git(t, repo, "init", "-q", "-b", "main")
+	testutil.WriteFile(t, filepath.Join(repo, ".gitignore"), ".env\n")
+	testutil.Git(t, repo, "add", ".gitignore")
+	testutil.Git(t, repo, "commit", "-q", "-m", "first")
+	testutil.Git(t, repo, "remote", "add", "origin", remote)
+	testutil.Git(t, repo, "push", "-q", "origin", "main")
+	testutil.WriteFile(t, filepath.Join(repo, ".env"), "SECRET=1\n")
+}
+
+func TestScanGroupsReposWhoseOnlyWorkIsSecretFiles(t *testing.T) {
+	home := t.TempDir()
+	pushedRepoWithSecret(t, home, "GitHub/api")
+	pushedRepoWithSecret(t, home, "GitHub/web")
+	seedRepo(t, home)
+	findings, err := New().Scan(testEnv(home, nil))
+	if err != nil {
+		t.Fatal(err)
+	}
+	for _, rel := range []string{"GitHub/api", "GitHub/web"} {
+		if slices.ContainsFunc(findings, func(f module.Finding) bool { return f.ID == "local-only:"+rel }) {
+			t.Errorf("%s got its own warning; want it in the grouped line", rel)
+		}
+	}
+	i := slices.IndexFunc(findings, func(f module.Finding) bool { return f.ID == "secret-files" })
+	if i < 0 {
+		t.Fatalf("findings = %+v, want one secret-files line", findings)
+	}
+	f := findings[i]
+	if f.Severity != module.SeverityInfo || f.Title != "2 repos have ignored files that look like secrets or local config" || !strings.Contains(f.Detail, "~/GitHub/api (1), ~/GitHub/web (1)") {
+		t.Errorf("finding = %+v", f)
+	}
+	if !slices.ContainsFunc(findings, func(f module.Finding) bool { return f.ID == "local-only:GitHub/app" }) {
+		t.Error("the repo with unpushed work lost its own warning")
 	}
 }
 

@@ -217,6 +217,12 @@ func (r Repo) risks() []string {
 	return out
 }
 
+// onlySecrets is true when the repo's only local work is ignored files that
+// look like secrets or local config.
+func (r Repo) onlySecrets() bool {
+	return len(r.Important) > 0 && r.Unpushed == 0 && len(r.Stash) == 0 && r.changedTracked() == 0 && len(r.Untracked) == 0
+}
+
 // changedTracked counts the status records for tracked files with changes:
 // ordinary (1), renamed or copied (2), and unmerged (u).
 func (r Repo) changedTracked() int {

@@ -15,10 +15,16 @@ import (
 )
 
 // skipDirs holds folders that never contain the user's own repos: app
-// state, caches, and package-manager checkouts.
+// state, caches, package-manager checkouts, and the clones version
+// managers, shell frameworks, and editor and agent plugin managers keep
+// and download again. Their files are still recorded and checked by the
+// files module; only the git checks skip them.
 var skipDirs = pathset.MustNew(
 	"Library/", ".Trash/", ".mtm/", ".cache/", ".npm/", ".rustup/",
 	".cargo/registry/", ".cargo/git/", "go/pkg/",
+	".asdf/", ".nvm/", ".pyenv/", ".rbenv/",
+	".oh-my-zsh/", ".tmux/plugins/", ".vim/plugged/", ".local/share/nvim/",
+	".claude/plugins/",
 	"node_modules", ".git",
 )
 
