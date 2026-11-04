@@ -33,6 +33,18 @@ jobs:
       - name: go test
         run: go test -race ./...
 
+      # GoReleaser publishes the release before it pushes the formula, so an
+      # unset token would leave a public release without its formula or
+      # attestation.
+      - name: The tap token is set
+        env:
+          HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
+        run: |
+          if [ -z "$HOMEBREW_TAP_TOKEN" ]; then
+            echo "Set the HOMEBREW_TAP_TOKEN secret before tagging a release."
+            exit 1
+          fi
+
       - uses: goreleaser/goreleaser-action@a4f02ab5355a589de60d917a659ce617ed19b3de # v7.3.0
         with:
           distribution: goreleaser

@@ -54,6 +54,14 @@ archives:
           group: root
           mode: 0644
           mtime: "{{ .CommitDate }}"
+      # The binary embeds catalog data that this file's BSD-2 notice (tape's)
+      # covers, so the notice travels with it.
+      - src: catalog/README.md
+        info:
+          owner: root
+          group: root
+          mode: 0644
+          mtime: "{{ .CommitDate }}"
 
 checksum:
   name_template: checksums.txt
@@ -69,6 +77,10 @@ release:
     owner: momentmaker
     name: mtm
   prerelease: auto
+  # GoReleaser publishes the release before the formula and the attestation,
+  # so a failed job is re-run. Without this the re-run can't upload the
+  # archive again. That's safe: the archive is reproducible.
+  replace_existing_artifacts: true
   header: |
     Install with Homebrew:
 
