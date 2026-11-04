@@ -131,11 +131,13 @@ The steps live in `~/.mtm/retire.json`, apart from the new Mac's `state.json`, s
 
 ### 6.6 Supply chain
 - Go with the standard library. The only third-party dependency is `github.com/BurntSushi/toml` (no transitive dependencies) for the catalog.
-- Dependencies are pinned in `go.sum`.
+- Dependencies are pinned in `go.sum`. GitHub Actions are pinned to full commit hashes, and tools CI runs (`govulncheck`, GoReleaser) to exact versions.
 - CI runs `govulncheck` on every change.
-- Release binaries come with SHA-256 checksums and GitHub build provenance attestations.
-- Distributed through a Homebrew tap under the project's GitHub organization.
-- Apple notarization of release binaries is planned and depends on an Apple Developer Program membership (section 12).
+- Releases are built by GoReleaser when a `v*` tag is pushed:
+  - for `darwin/arm64` only, with `-trimpath`, `CGO_ENABLED=0`, and file times set to the commit's time, so a rebuild of the same commit with the same Go version gives the same binary;
+  - with SHA-256 checksums in `checksums.txt`, and a GitHub build provenance attestation for each archive, which `gh attestation verify` checks.
+- Distributed through a Homebrew formula in the `momentmaker/homebrew-tap` tap. The formula requires Apple Silicon and macOS 26.
+- Version 1 isn't notarized (section 12). A binary Homebrew downloads for a formula carries no quarantine flag, so it runs without notarization.
 
 ## 7. Architecture
 
@@ -524,10 +526,13 @@ Identities are recorded, never key material.
   3. Inject faults: delete a critical file, corrupt a file without changing its time, change a repo's refs, remove a Docker volume, change a file on the source after `prepare`.
   4. Check that `verify` reports each fault with the right outcome and that `retire` flags the late change.
 - **Real Migration Assistant run.** The author's own migration from the M3 is the first real-world test. Findings feed the catalog, fixtures, and the "unconfirmed" rows in section 3.
-- **CI** (GitHub Actions, Apple Silicon runners): `go test ./...`, `go vet`, `gofmt` check, `govulncheck`, catalog validation, and reproducible release builds with checksums and provenance attestations.
+- **CI** (GitHub Actions, `macos-26` Apple Silicon runners), on every push and pull request:
+  - the `gofmt` check, `go vet` with and without the `integration` tag, `go test -race ./...` (which includes catalog validation), and `govulncheck`;
+  - a GoReleaser snapshot build, whose binary must report its snapshot version, and whose formula must require Apple Silicon and macOS 26.
+  - The integration tests skip themselves on CI runners, which have no FileVault, Docker Desktop, or Homebrew Postgres.
 
 ## 12. Open questions and risks
-1. **Notarization** needs an Apple Developer Program membership. If none is available, version 1 ships through a Homebrew formula and checksummed release binaries without notarization.
+1. **Notarization** needs an Apple Developer Program membership. Version 1 ships without it, through a Homebrew formula and checksummed, attested release binaries (section 6.6).
 2. **The macOS 26 "Privacy & Security Settings" checkbox** in Migration Assistant has undocumented scope. If it does migrate privacy permissions, the `permissions` module's verify step marks those checklist items done automatically. The design works either way.
 3. **Whether Migration Assistant copies `Docker.raw` intact** is unconfirmed. The design handles both outcomes (section 9.5). `Docker.raw` is also a sparse file: on the author's Mac it is 494 GB with 49 GB in use. If Migration Assistant doesn't keep it sparse, the new Mac needs the full size free.
 4. **Google session binding (Device Bound Session Credentials)** comes from a single news source. The design treats re-sign-in as a checklist item, which costs little if it turns out unnecessary.

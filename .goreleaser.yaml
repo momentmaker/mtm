@@ -1,0 +1,85 @@
+# GoReleaser builds mtm's releases when a v* tag is pushed, and CI builds a
+# snapshot of the same on every push (.github/workflows/ci.yml).
+version: 2
+
+project_name: mtm
+
+before:
+  hooks:
+    # Fail rather than rewrite go.mod or go.sum: a release builds exactly
+    # what was committed.
+    - go mod tidy -diff
+
+builds:
+  - id: mtm
+    main: ./cmd/mtm
+    binary: mtm
+    env:
+      - CGO_ENABLED=0
+    # mtm supports Apple Silicon only (spec 2).
+    goos:
+      - darwin
+    goarch:
+      - arm64
+    flags:
+      - -trimpath
+    ldflags:
+      - -s -w -X main.version={{ .Version }}
+    # The commit's time, not the build's, so a rebuild of the same commit
+    # with the same Go version gives the same archive.
+    mod_timestamp: "{{ .CommitTimestamp }}"
+
+archives:
+  - id: mtm
+    formats: [tar.gz]
+    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    files:
+      - LICENSE
+      - README.md
+
+checksum:
+  name_template: checksums.txt
+
+snapshot:
+  version_template: "{{ incpatch .Version }}-next"
+
+changelog:
+  sort: asc
+
+release:
+  github:
+    owner: momentmaker
+    name: mtm
+  prerelease: auto
+  header: |
+    Install with Homebrew:
+
+    ```
+    brew install momentmaker/tap/mtm
+    ```
+
+    Check where an archive came from:
+
+    ```
+    gh attestation verify mtm_{{ .Version }}_darwin_arm64.tar.gz --repo momentmaker/mtm
+    ```
+
+# A formula, not a cask: a binary Homebrew downloads for a formula carries no
+# quarantine flag, so the un-notarized mtm runs without removing Gatekeeper's
+# check (spec 6.6). GoReleaser marks brews deprecated in favor of casks.
+brews:
+  - name: mtm
+    repository:
+      owner: momentmaker
+      name: homebrew-tap
+      token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
+    homepage: https://github.com/momentmaker/mtm
+    description: "Move a developer's Mac to a new Mac alongside Migration Assistant, and prove nothing was lost"
+    license: MIT
+    custom_block: |
+      depends_on arch: :arm64
+      depends_on macos: :tahoe
+    install: |
+      bin.install "mtm"
+    test: |
+      assert_match version.to_s, shell_output("#{bin}/mtm version")

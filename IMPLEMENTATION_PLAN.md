@@ -178,6 +178,14 @@ Nothing is tagged or released.
 **Plan**: `docs/superpowers/plans/2026-11-03-mtm-stage5-part1-ci-release-docs.md`
 **Status**: In Progress
 
+#### Known gaps carried out of Stage 5, Part 1
+Found while planning.
+- **The CI and release files ran first on GitHub.** The author's Mac couldn't run actionlint or GoReleaser, so a branch's first push was their first run. The release workflow runs only on a tag, so its first run is `v0.1.0` (Part 2).
+- **GoReleaser marks `brews` deprecated** in favor of Homebrew casks, so `goreleaser check` exits 2. CI's dry run builds a snapshot instead.
+  - A cask for an un-notarized binary needs its quarantine flag removed, which mtm won't do.
+  - If GoReleaser removes `brews`, the formula must be written another way.
+- **The author's Go toolchain:** Go 1.26.1 has GO-2026-4869 (`archive/tar`), so `govulncheck` fails on it until Go is upgraded to 1.26.2 or later. CI and releases take the newest 1.26 patch.
+
 ### Stage 5, Part 2: Real migration, end-to-end suite, and first release
 **Goal**:
 - the author's own migration to the new Mac with mtm, which settles the "Real-run validation pending" items above;

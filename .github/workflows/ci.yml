@@ -1,0 +1,95 @@
+# Every push and pull request runs the same checks as a contributor's
+# gate. Actions are pinned to full commit hashes and tools to exact
+# versions (spec 6.6), so an upstream change can't alter the build unseen.
+name: CI
+
+on:
+  push:
+    branches: ["**"]
+  pull_request:
+
+permissions:
+  contents: read
+
+jobs:
+  test:
+    name: Test
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          persist-credentials: false
+
+      # check-latest takes the newest Go 1.26 patch, which carries the
+      # standard library's security fixes.
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          check-latest: true
+
+      - name: gofmt
+        run: |
+          unformatted=$(gofmt -l .)
+          if [ -n "$unformatted" ]; then
+            echo "These files need gofmt:"
+            echo "$unformatted"
+            exit 1
+          fi
+
+      - name: go vet
+        run: go vet ./...
+
+      - name: go vet with the integration tag
+        run: go vet -tags integration ./...
+
+      - name: go test
+        run: go test -race ./...
+
+      - name: govulncheck
+        run: go run golang.org/x/vuln/cmd/govulncheck@v1.9.0 ./...
+
+  release-dry-run:
+    name: Release dry run
+    runs-on: macos-26
+    steps:
+      - uses: actions/checkout@3d3c42e5aac5ba805825da76410c181273ba90b1 # v7.0.1
+        with:
+          fetch-depth: 0
+          persist-credentials: false
+
+      - uses: actions/setup-go@b7ad1dad31e06c5925ef5d2fc7ad053ef454303e # v7.0.0
+        with:
+          go-version-file: go.mod
+          check-latest: true
+
+      # A snapshot builds everything a release would and publishes nothing.
+      # The tap token is never used, but the config names it, so it must
+      # be set.
+      - uses: goreleaser/goreleaser-action@a4f02ab5355a589de60d917a659ce617ed19b3de # v7.3.0
+        with:
+          distribution: goreleaser
+          version: v2.19.0
+          args: release --snapshot --clean
+        env:
+          HOMEBREW_TAP_TOKEN: ""
+
+      - name: The archive and checksums exist
+        run: |
+          ls dist/mtm_*_darwin_arm64.tar.gz
+          grep -q '_darwin_arm64.tar.gz$' dist/checksums.txt
+
+      - name: The built binary reports its snapshot version
+        run: |
+          version=$(dist/mtm_darwin_arm64*/mtm version)
+          echo "$version"
+          case "$version" in
+            "mtm "*-next) ;;
+            *) echo "unexpected version output"; exit 1 ;;
+          esac
+
+      - name: The formula requires Apple Silicon and macOS 26
+        run: |
+          formula=$(find dist -name mtm.rb)
+          cat "$formula"
+          grep -q 'depends_on arch: :arm64' "$formula"
+          grep -q 'depends_on macos: :tahoe' "$formula"
