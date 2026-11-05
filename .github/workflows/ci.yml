@@ -62,19 +62,23 @@ jobs:
           go-version-file: go.mod
           check-latest: true
 
+      # check fails on an invalid or deprecated setting.
+      - uses: goreleaser/goreleaser-action@a4f02ab5355a589de60d917a659ce617ed19b3de # v7.3.0
+        with:
+          distribution: goreleaser
+          version: v2.19.0
+          args: check
+
       # A snapshot builds everything a release would and publishes nothing.
-      # The tap token is empty: a snapshot never publishes.
       - uses: goreleaser/goreleaser-action@a4f02ab5355a589de60d917a659ce617ed19b3de # v7.3.0
         with:
           distribution: goreleaser
           version: v2.19.0
           args: release --snapshot --clean
-        env:
-          HOMEBREW_TAP_TOKEN: ""
 
       - name: The archive and checksums exist
         run: |
-          ls dist/mtm_*_darwin_arm64.tar.gz
+          ls dist/mtm_darwin_arm64.tar.gz
           grep -q '_darwin_arm64.tar.gz$' dist/checksums.txt
 
       - name: The built binary reports its snapshot version
@@ -86,13 +90,6 @@ jobs:
             *) echo "unexpected version output"; exit 1 ;;
           esac
 
-      - name: The formula requires Apple Silicon and macOS 26
-        run: |
-          formula=$(find dist -name mtm.rb)
-          cat "$formula"
-          grep -q 'depends_on arch: :arm64' "$formula"
-          grep -q 'depends_on macos: :tahoe' "$formula"
-
       - name: Keep the first checksums and change the files' times
         run: |
           cp dist/checksums.txt "$RUNNER_TEMP/first-checksums.txt"
@@ -103,8 +100,6 @@ jobs:
           distribution: goreleaser
           version: v2.19.0
           args: release --snapshot --clean
-        env:
-          HOMEBREW_TAP_TOKEN: ""
 
       - name: The archive is the same when built again
         run: diff "$RUNNER_TEMP/first-checksums.txt" dist/checksums.txt

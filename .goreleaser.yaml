@@ -33,7 +33,9 @@ builds:
 archives:
   - id: mtm
     formats: [tar.gz]
-    name_template: "{{ .ProjectName }}_{{ .Version }}_{{ .Os }}_{{ .Arch }}"
+    # No version in the name, so releases/latest/download/mtm_darwin_arm64.tar.gz
+    # always points at the newest release.
+    name_template: "{{ .ProjectName }}_{{ .Os }}_{{ .Arch }}"
     # Owner, group, mode and time are pinned, so the archive doesn't depend
     # on the build machine or the checkout's file times.
     builds_info:
@@ -77,41 +79,27 @@ release:
     owner: momentmaker
     name: mtm
   prerelease: auto
-  # GoReleaser publishes the release before the formula and the attestation,
-  # so a failed job is re-run. Without this the re-run can't upload the
-  # archive again. That's safe: the archive is reproducible.
+  # The attestation runs after GoReleaser publishes, so a failed job is
+  # re-run. Without this the re-run can't upload the archive again. That's
+  # safe: the archive is reproducible.
   replace_existing_artifacts: true
   header: |
-    Install with Homebrew:
+    Install with Go 1.26:
 
     ```
-    brew install momentmaker/tap/mtm
+    go install github.com/momentmaker/mtm/cmd/mtm@{{ .Tag }}
+    ```
+
+    Or download the archive with curl. mtm isn't notarized, and macOS won't
+    run a binary a browser downloaded; curl doesn't mark it that way.
+
+    ```
+    mkdir -p ~/.local/bin
+    curl -fsSL https://github.com/momentmaker/mtm/releases/download/{{ .Tag }}/mtm_darwin_arm64.tar.gz | tar -xz -C ~/.local/bin mtm
     ```
 
     Check where an archive came from:
 
     ```
-    gh attestation verify mtm_{{ .Version }}_darwin_arm64.tar.gz --repo momentmaker/mtm
+    gh attestation verify mtm_darwin_arm64.tar.gz --repo momentmaker/mtm
     ```
-
-# A formula, not a cask: a binary Homebrew downloads for a formula carries no
-# quarantine flag, so the un-notarized mtm runs without removing Gatekeeper's
-# check (spec 6.6). GoReleaser marks brews deprecated in favor of casks.
-brews:
-  - name: mtm
-    repository:
-      owner: momentmaker
-      name: homebrew-tap
-      token: "{{ .Env.HOMEBREW_TAP_TOKEN }}"
-    homepage: https://github.com/momentmaker/mtm
-    description: "Move a developer's Mac to a new Mac and prove nothing was lost"
-    # A prerelease tag such as v0.1.0-rc.1 doesn't update the tap's formula.
-    skip_upload: auto
-    license: MIT
-    custom_block: |
-      depends_on arch: :arm64
-      depends_on macos: :tahoe
-    install: |
-      bin.install "mtm"
-    test: |
-      assert_match version.to_s, shell_output("#{bin}/mtm version")

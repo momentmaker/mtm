@@ -36,5 +36,5 @@ Fixes go into the latest release.
 Each release archive has a SHA-256 checksum in `checksums.txt` and a GitHub build provenance attestation. To check where an archive came from:
 
 ```sh
-gh attestation verify mtm_<version>_darwin_arm64.tar.gz --repo momentmaker/mtm
+gh attestation verify mtm_darwin_arm64.tar.gz --repo momentmaker/mtm
 ```

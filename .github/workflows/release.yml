@@ -1,7 +1,5 @@
 # Pushing a v* tag publishes a release: the darwin/arm64 archive,
-# checksums.txt, a build provenance attestation for each archive, and the
-# formula in momentmaker/homebrew-tap. HOMEBREW_TAP_TOKEN must be a token
-# that can push to that repository.
+# checksums.txt, and a build provenance attestation for each archive.
 name: Release
 
 on:
@@ -33,18 +31,6 @@ jobs:
       - name: go test
         run: go test -race ./...
 
-      # GoReleaser publishes the release before it pushes the formula, so an
-      # unset token would leave a public release without its formula or
-      # attestation.
-      - name: The tap token is set
-        env:
-          HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
-        run: |
-          if [ -z "$HOMEBREW_TAP_TOKEN" ]; then
-            echo "Set the HOMEBREW_TAP_TOKEN secret before tagging a release."
-            exit 1
-          fi
-
       - uses: goreleaser/goreleaser-action@a4f02ab5355a589de60d917a659ce617ed19b3de # v7.3.0
         with:
           distribution: goreleaser
@@ -52,7 +38,6 @@ jobs:
           args: release --clean
         env:
           GITHUB_TOKEN: ${{ secrets.GITHUB_TOKEN }}
-          HOMEBREW_TAP_TOKEN: ${{ secrets.HOMEBREW_TAP_TOKEN }}
 
       - uses: actions/attest-build-provenance@4d101475d8b20a2381f78447822ac1eab6504dd8 # v4.2.2
         with:

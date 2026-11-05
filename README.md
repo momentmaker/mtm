@@ -2,7 +2,7 @@
 
 Move a developer's Apple Silicon Mac to a new one, alongside Migration Assistant, and prove nothing was lost before you erase the old one.
 
-> **Status: not released yet.** mtm hasn't been through a real migration yet. That run is planned, and it comes before the first release. Until then, read what each command does before you run it.
+> **Status: early release.** mtm hasn't been through a real migration yet; that run is next. Read what each command does before you run it.
 
 ## Why
 
@@ -24,17 +24,22 @@ mtm works around Migration Assistant.
 
 ## Install
 
-Once released:
+mtm is a command-line tool. Install it one of two ways.
 
-```sh
-brew install momentmaker/tap/mtm
-```
-
-From source, with Go 1.26:
+With Go 1.26 or later, which builds it on your Mac:
 
 ```sh
 go install github.com/momentmaker/mtm/cmd/mtm@latest
 ```
+
+Or download a release archive from [Releases](https://github.com/momentmaker/mtm/releases) with `curl`, and unpack `mtm` into a folder on your `PATH`:
+
+```sh
+mkdir -p ~/.local/bin
+curl -fsSL https://github.com/momentmaker/mtm/releases/latest/download/mtm_darwin_arm64.tar.gz | tar -xz -C ~/.local/bin mtm
+```
+
+Use `curl`, not a browser. mtm isn't notarized, and macOS won't run a binary a browser downloaded without asking you to allow it in System Settings > Privacy & Security. `SECURITY.md` says how to check an archive came from this repository.
 
 ## Use
 

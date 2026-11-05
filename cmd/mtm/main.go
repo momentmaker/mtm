@@ -10,6 +10,7 @@ import (
 	"os"
 	"os/signal"
 	"os/user"
+	"runtime/debug"
 	"strings"
 	"time"
 
@@ -74,10 +75,25 @@ var commands = map[string]command{
 }
 
 func main() {
+	version = buildVersion(version, debug.ReadBuildInfo)
 	ctx, stop := signal.NotifyContext(context.Background(), os.Interrupt)
 	code := run(ctx, os.Args[1:], os.Stdout, os.Stderr, defaultApp)
 	stop()
 	os.Exit(code)
+}
+
+// buildVersion is the version a release build was given, or for a binary
+// built by go install from a tag, the module version Go records in it, so
+// mtm version names what a bug report is about. A build in a checkout has
+// neither and stays dev.
+func buildVersion(set string, info func() (*debug.BuildInfo, bool)) string {
+	if set != "dev" {
+		return set
+	}
+	if bi, ok := info(); ok && bi.Main.Version != "" && bi.Main.Version != "(devel)" {
+		return strings.TrimPrefix(bi.Main.Version, "v")
+	}
+	return set
 }
 
 // defaultApp lists databases before homebrew: pg_dumpall needs Postgres

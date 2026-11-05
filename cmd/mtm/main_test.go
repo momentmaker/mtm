@@ -6,6 +6,7 @@ import (
 	"encoding/json"
 	"os"
 	"path/filepath"
+	"runtime/debug"
 	"slices"
 	"strings"
 	"testing"
@@ -345,5 +346,27 @@ func TestCleanupNamesADetachedStageFolder(t *testing.T) {
 	code := run(ctx, []string{"cleanup", "--force"}, &out, &errOut, fileVaultOnApp)
 	if code != exitOK || !strings.Contains(out.String(), "Also delete /Volumes/Gone/mtm-exports") {
 		t.Errorf("code %d out %q", code, out.String())
+	}
+}
+
+func TestBuildVersion(t *testing.T) {
+	module := func(v string) func() (*debug.BuildInfo, bool) {
+		return func() (*debug.BuildInfo, bool) { return &debug.BuildInfo{Main: debug.Module{Version: v}}, true }
+	}
+	noInfo := func() (*debug.BuildInfo, bool) { return nil, false }
+	tests := []struct {
+		name, set string
+		info      func() (*debug.BuildInfo, bool)
+		want      string
+	}{
+		{"a release build keeps the version it was given", "0.1.0", module("v0.2.0"), "0.1.0"},
+		{"go install of a tag reports the tag", "dev", module("v0.1.0"), "0.1.0"},
+		{"a build in a checkout stays dev", "dev", module("(devel)"), "dev"},
+		{"no build info stays dev", "dev", noInfo, "dev"},
+	}
+	for _, tt := range tests {
+		if got := buildVersion(tt.set, tt.info); got != tt.want {
+			t.Errorf("%s: buildVersion = %q, want %q", tt.name, got, tt.want)
+		}
 	}
 }

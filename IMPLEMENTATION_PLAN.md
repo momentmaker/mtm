@@ -178,22 +178,22 @@ Nothing is tagged or released.
 **Plan**: `docs/superpowers/plans/2026-11-03-mtm-stage5-part1-ci-release-docs.md`
 **Status**: Complete
 
+**Change after Part 1 (2026-11-04):** the Homebrew formula was dropped. Releases are archives on GitHub, plus `go install`. An archive's name has no version in it, so `releases/latest/download/mtm_darwin_arm64.tar.gz` always points at the newest one. `mtm version` reports the module version for a `go install` of a tag. CI's dry run now also runs `goreleaser check`.
+
 #### Known gaps carried out of Stage 5, Part 1
 Found while planning.
 - **The CI and release files ran first on GitHub.** The author's Mac couldn't run actionlint or GoReleaser, so a branch's first push was their first run. The release workflow runs only on a tag, so its first run is `v0.1.0` (Part 2).
-- **GoReleaser marks `brews` deprecated** in favor of Homebrew casks, so `goreleaser check` exits 2. CI's dry run builds a snapshot instead.
-  - A cask for an un-notarized binary needs its quarantine flag removed, which mtm won't do.
-  - If GoReleaser removes `brews`, the formula must be written another way.
 - **The author's Go toolchain:** Go 1.26.1 has GO-2026-4869 (`archive/tar`), so `govulncheck` fails on it until Go is upgraded to 1.26.2 or later. CI and releases take the newest 1.26 patch.
-- **Release hardening waits for the first release (Part 2):** move the release workflow's permissions to the job; keep `HOMEBREW_TAP_TOKEN` in an environment limited to `v*` tags, as a fine-grained token that can write only `momentmaker/homebrew-tap`'s contents; check GoReleaser's download by its cosign signature, not only its checksum; and run gofmt, vet, and govulncheck in the release job too.
+- **Release hardening (Part 2):** move the release workflow's permissions to the job; check GoReleaser's download by its cosign signature, not only its checksum; and run gofmt, vet, and govulncheck in the release job too.
 
 ### Stage 5, Part 2: Real migration, end-to-end suite, and first release
 **Goal**:
 - the author's own migration to the new Mac with mtm, which settles the "Real-run validation pending" items above;
 - the Tart end-to-end suite: a cloned VM as a perfect migration, with injected faults;
-- the `HOMEBREW_TAP_TOKEN` secret, the `v0.1.0` tag, and a working `brew install momentmaker/tap/mtm`;
-- before the tag: update README.md's status note and "Once released" wording; add the `go install` version fallback (`debug.ReadBuildInfo`), so a source build reports its version and not `dev`; and check private vulnerability reporting is still on.
+- the release hardening listed in Part 1's known gaps, and a release after the migration with what it taught.
 
-**Success Criteria**: tagging a release produces checksummed, attested binaries and a working `brew install`. The Tart end-to-end suite passes locally.
+`v0.1.0` was tagged before the migration (2026-11-04), as an early release.
+
+**Success Criteria**: the Tart end-to-end suite passes locally, and the migration's findings are fixed in a release.
 **Tests**: the Tart suite; the release itself.
 **Status**: Not Started
